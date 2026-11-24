@@ -120,3 +120,6 @@ td.wrap{white-space:normal}
 
 .checks{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px;border:1px solid var(--bd);border-radius:8px;background:#fff}
 .checks .chk{display:flex;align-items:center;gap:6px;margin:0}
+
+.lvres{max-height:180px;overflow:auto}.lvopt{padding:8px 10px;border:1px solid var(--line,#ddd);border-radius:8px;margin:4px 0;cursor:pointer}.lvopt:hover{background:#eef4ff}.chosen{padding:8px 10px;background:#eaf7ee;border-radius:8px;margin:6px 0}
+.kpi.click,.click{cursor:pointer}.kpi.click:hover{outline:2px solid #1d4ed8}

@@ -5,7 +5,7 @@ const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'ف�
 const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '1.5';
+const APP_BUILD = '1.6';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
@@ -187,15 +187,16 @@ function homeScreen(el) {
      <div class="mc-sub">سُجّلت ${recordedCount(s.id, ty)} من ${planOf(s, ty)} محاضرة</div><button class="btn">تسجيل الغياب</button></div>`;
   }).join('');
   el.innerHTML = `${isStaff ? `<h2 style="font-size:1.4rem">موادي</h2>${cards ? `<div class="grid mygrid">${cards}</div>` : '<div class="card empty">لم تُخصَّص لك مواد بعد. تواصل مع مدير النظام.</div>'}` : `<div class="grid kpis">
-   <div class="kpi"><b>${ss.length}</b><span>محاضرات مسجلة اليوم</span></div>
-   <div class="kpi"><b>${ab}</b><span>غيابات اليوم</span></div>
-   <div class="kpi"><b>${live('students').length}</b><span>الطلبة</span></div>
-   <div class="kpi"><b>${mySubjects().length}</b><span>المواد</span></div></div>
+   <div class="kpi click" data-k="hSess"><b>${ss.length}</b><span>محاضرات مسجلة اليوم</span></div>
+   <div class="kpi click" data-k="hAbs"><b>${ab}</b><span>غيابات اليوم</span></div>
+   <div class="kpi click" data-k="hStu"><b>${live('students').length}</b><span>الطلبة</span></div>
+   <div class="kpi click" data-k="hSub"><b>${mySubjects().length}</b><span>المواد</span></div></div>
    <div class="card" style="margin-top:14px"><h2>إجراءات سريعة</h2><div class="row">
    ${can('recordAttendance') ? '<button class="btn" data-go="attend">تسجيل غياب محاضرة</button>' : ''}${can('viewReports') ? '<button class="btn ghost" data-go="reports">التقارير</button>' : ''}</div>
    ${!mySubjects().length ? '<p class="muted">لا توجد مواد بعد. أضِف المواد من قسم «المواد الدراسية».</p>' : ''}</div>`}
    ${state.pending ? `<p class="muted">يوجد ${state.pending} تعديل بانتظار الرفع إلى الخادم عند توفر الإنترنت.</p>` : ''}`;
   el.onclick = e => {
+    const k = e.target.closest('[data-k^=h]'); if (k) return kpiClick(k.dataset.k);
     const b = e.target.closest('[data-go]'); if (b) return go(b.dataset.go);
     const c = e.target.closest('[data-att]'); if (c) { const [id, ty] = c.dataset.att.split('|'); attInit(id, ty); go('attend'); }
   };
@@ -212,7 +213,7 @@ function attInit(subjId, type) {
     att.no = n; attLoad();
   }
 }
-const leaveFor = (st, date) => live('leaves').find(l => l.deptId === st.deptId && l.from <= date && date <= l.to && (l.scope === 'dept' || (l.scope === 'stage' && String(l.stage) === String(st.stage)) || (l.scope === 'student' && l.studentId === st.id)));
+const leaveFor = (st, date) => live('leaves').find(l => l.studentId === st.id && l.from <= date && date <= l.to);
 function leavePrefill(s) { studentsOf(s, att.section).forEach(x => { if (leaveFor(x, att.date)) att.states[x.id] = 'excused'; }); }
 function attLoad() {
   const s = get('subjects', att.subjectId); if (!s) return;
@@ -346,7 +347,7 @@ function reportsScreen(el) {
   const sections = [...new Set(live('students').filter(x => (!dept || x.deptId === dept) && (!rf.stage || String(x.stage) === rf.stage)).map(x => x.section).filter(Boolean))].sort();
   const C = calc(rf);
   let rows = C.rows.filter(r => r.total > 0 || rf.level === '');
-  if (rf.level) rows = rows.filter(r => r.level === rf.level);
+  if (rf.level) rows = rows.filter(r => rf.level === 'any' ? (r.level === 'warn' || r.level === 'ban') : r.level === rf.level);
   if (rf.q) rows = rows.filter(r => r.st.name.includes(rf.q));
   rows.sort((a, b) => b.pct - a.pct || b.absent - a.absent);
   const totAbs = C.rows.reduce((s, r) => s + r.weighted, 0), totPos = C.rows.reduce((s, r) => s + r.total, 0);
@@ -358,14 +359,14 @@ function reportsScreen(el) {
    <select id="fSub"><option value="">كل المواد</option>${subsAll.map(s => `<option value="${s.id}"${s.id === rf.subject ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
    <select id="fSec"><option value="">كل الشعب</option>${sections.map(s => `<option${s === rf.section ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select>
    <input type="date" id="fFrom" value="${rf.from}" title="من تاريخ"><input type="date" id="fTo" value="${rf.to}" title="إلى تاريخ">
-   <select id="fLevel"><option value="">كل الحالات</option><option value="warn"${rf.level === 'warn' ? ' selected' : ''}>إنذار</option><option value="ban"${rf.level === 'ban' ? ' selected' : ''}>حرمان</option></select>
+   <select id="fLevel"><option value="">كل الحالات</option><option value="any"${rf.level === 'any' ? ' selected' : ''}>إنذار وحرمان</option><option value="warn"${rf.level === 'warn' ? ' selected' : ''}>إنذار</option><option value="ban"${rf.level === 'ban' ? ' selected' : ''}>حرمان</option></select>
    <input type="search" id="fQ" placeholder="بحث باسم الطالب" value="${esc(rf.q)}"></div>
-  <div class="grid kpis"><div class="kpi"><b>${C.sessions.length}</b><span>محاضرات مسجلة</span></div>
-   <div class="kpi"><b>${+totAbs.toFixed(1)}</b><span>إجمالي الغيابات (حضور ساعة واحدة بوزنه)</span></div>
-   <div class="kpi"><b>${totPos ? (totAbs / totPos * 100).toFixed(1) : 0}%</b><span>نسبة الغياب العامة</span></div>
-   <div class="kpi"><b>${warnCnt}</b><span>طلبة (إنذار/حرمان)</span></div></div>
-  ${C.bySub.length ? `<div class="card" style="margin-top:14px"><h2>نسبة الغياب حسب المادة</h2>${C.bySub.sort((a, b) => b.absent / (b.total || 1) - a.absent / (a.total || 1)).map(b => { const p = b.total ? b.absent / b.total * 100 : 0; const S = settings(); return `<div class="bar"><span class="lb">${esc(b.sb.name)}</span><div class="tr"><div class="fi ${p >= S.banPct ? 'b' : p >= S.warnPct ? 'w' : ''}" style="width:${Math.min(100, p * 2)}%"></div></div><b>${p.toFixed(1)}%</b></div>`; }).join('')}<p class="muted">الإنذار عند ${settings().warnPct}% والحرمان عند ${settings().banPct}% (يغيّرها مدير النظام من الإعدادات).</p></div>` : ''}
-  <div class="card" style="padding:0"><div class="row" style="padding:10px"><h2 class="grow" style="margin:0">الطلبة (${rows.length})</h2>${can('exportData') ? '<button class="btn ghost sm" id="fCsv">تصدير الملخص</button><button class="btn ghost sm" id="fDet">تصدير تفصيلي</button>' : ''}</div>
+  <div class="grid kpis"><div class="kpi click" data-k="rSess"><b>${C.sessions.length}</b><span>محاضرات مسجلة</span></div>
+   <div class="kpi click" data-k="rAbs"><b>${+totAbs.toFixed(1)}</b><span>إجمالي الغيابات (حضور ساعة واحدة بوزنه)</span></div>
+   <div class="kpi click" data-k="rPct"><b>${totPos ? (totAbs / totPos * 100).toFixed(1) : 0}%</b><span>نسبة الغياب العامة</span></div>
+   <div class="kpi click" data-k="rWarn"><b>${warnCnt}</b><span>طلبة (إنذار/حرمان)</span></div></div>
+  ${C.bySub.length ? `<div class="card" style="margin-top:14px"><h2>نسبة الغياب حسب المادة</h2>${C.bySub.sort((a, b) => b.absent / (b.total || 1) - a.absent / (a.total || 1)).map(b => { const p = b.total ? b.absent / b.total * 100 : 0; const S = settings(); return `<div class="bar click" data-sub="${b.sb.id}" title="عرض طلبة هذه المادة"><span class="lb">${esc(b.sb.name)}</span><div class="tr"><div class="fi ${p >= S.banPct ? 'b' : p >= S.warnPct ? 'w' : ''}" style="width:${Math.min(100, p * 2)}%"></div></div><b>${p.toFixed(1)}%</b></div>`; }).join('')}<p class="muted">الإنذار عند ${settings().warnPct}% والحرمان عند ${settings().banPct}% (يغيّرها مدير النظام من الإعدادات).</p></div>` : ''}
+  <div class="card" style="padding:0"><div class="row" style="padding:10px"><h2 class="grow" style="margin:0">الطلبة (${rows.length})</h2>${'<button class="btn sm" id="fPdf">تقرير رسومي (PDF)</button>'}${can('exportData') ? '<button class="btn ghost sm" id="fCsv">تصدير الملخص</button><button class="btn ghost sm" id="fDet">تصدير تفصيلي</button>' : ''}</div>
    <div class="tblwrap"><table><thead><tr><th>الطالب</th><th>المرحلة</th><th>الشعبة</th><th>المقررة</th><th>غياب</th><th>أول ساعة فقط</th><th>آخر ساعة فقط</th><th>مجاز</th><th>النسبة</th><th>الحالة</th></tr></thead><tbody>
    ${rows.slice(0, rf.limit).map(r => `<tr data-st="${r.st.id}" style="cursor:pointer"><td>${esc(r.st.name)}</td><td>${STAGE[r.st.stage] || ''}</td><td>${esc(r.st.section || '')}</td><td>${r.total}</td><td>${r.absent}</td><td>${r.pfirst}</td><td>${r.plast}</td><td>${r.excused}</td><td>${r.total ? r.pct.toFixed(1) + '%' : '—'}</td><td>${r.level ? `<span class="badge ${LEVEL[r.level][0]}">${LEVEL[r.level][1]}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="empty">لا توجد بيانات</td></tr>'}</tbody></table></div>
    ${rows.length > rf.limit ? '<div class="row end" style="padding:10px"><button class="btn ghost" id="fMore">عرض المزيد</button></div>' : ''}</div>`;
@@ -377,6 +378,92 @@ function reportsScreen(el) {
   if ($('#fCsv')) $('#fCsv').onclick = () => downloadCsv('تقرير-الغيابات-' + today() + '.csv',
     [['الطالب', 'المرحلة', 'الشعبة', 'المحاضرات المقررة', 'غياب', 'حضر الساعة الأولى فقط', 'حضر الساعة الأخيرة فقط', 'مجاز', 'النسبة %', 'الحالة']].concat(rows.map(r => [r.st.name, STAGE[r.st.stage] || '', r.st.section || '', r.total, r.absent, r.pfirst, r.plast, r.excused, r.total ? r.pct.toFixed(1) : '', r.level ? LEVEL[r.level][1] : ''])));
   el.querySelectorAll('tr[data-st]').forEach(tr => tr.onclick = () => studentDetail(tr.dataset.st));
+  el.querySelectorAll('[data-k]').forEach(k => k.onclick = () => kpiClick(k.dataset.k, C, rows, el));
+  el.querySelectorAll('[data-sub]').forEach(k => k.onclick = () => { rf.subject = k.dataset.sub; rf.level = ''; reportsScreen(el); });
+  if ($('#fPdf')) $('#fPdf').onclick = () => printReport(C, rows);
+}
+
+/* ---------- الأرقام القابلة للنقر ---------- */
+function listModal(title, head, body) {
+  showModal(title, `<div class="tblwrap"><table><thead><tr>${head.map(h => '<th>' + h + '</th>').join('')}</tr></thead><tbody>${body.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('') || '<tr><td colspan="' + head.length + '" class="empty">لا توجد بيانات</td></tr>'}</tbody></table></div><div class="row end"><button class="btn ghost" data-close>إغلاق</button></div>`, true);
+}
+const sessRow = x => [x.date, esc(subjectName(x.subjectId)), TYPE[x.type || 'theory'], x.lectureNo || '', esc(x.section || '')];
+const absRow = a => { const t = get('students', a.studentId) || {}; return [a.date, esc(t.name || ''), esc(subjectName(a.subjectId)), `<span class="badge ${BADGE[a.status]}">${STATUS[a.status] || a.status}</span>`]; };
+function kpiClick(k, C, rows, el) {
+  const t = today();
+  const mine = new Set(mySubjects().map(s => s.id));
+  if (k === 'hSess') return listModal('محاضرات اليوم', ['التاريخ', 'المادة', 'النوع', 'المحاضرة', 'الشعبة'], live('sessions').filter(x => x.date === t && mine.has(x.subjectId)).map(sessRow));
+  if (k === 'hAbs') return listModal('غيابات اليوم', ['التاريخ', 'الطالب', 'المادة', 'الحالة'], live('absences').filter(a => a.date === t && a.status === 'absent' && mine.has(a.subjectId)).map(absRow));
+  if (k === 'hStu') return go('students');
+  if (k === 'hSub') return go('subjects');
+  if (k === 'rSess') return listModal('المحاضرات المسجلة', ['التاريخ', 'المادة', 'النوع', 'المحاضرة', 'الشعبة'], C.sessions.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 300).map(sessRow));
+  if (k === 'rAbs') return listModal('سجل الغيابات (الأحدث أولاً)', ['التاريخ', 'الطالب', 'المادة', 'الحالة'], C.abs.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 300).map(absRow));
+  if (k === 'rPct') { const n = $('.tblwrap table'); if (n) n.scrollIntoView({ behavior: 'smooth' }); return; }
+  if (k === 'rWarn') { rf.level = 'any'; rf.limit = 100; return reportsScreen(el); }
+}
+
+/* ---------- التقرير الرسومي (PDF عبر الطباعة) ---------- */
+function printHtml(title, body) {
+  const old = document.getElementById('printFrame'); if (old) old.remove();
+  const f = document.createElement('iframe'); f.id = 'printFrame'; f.style.cssText = 'position:fixed;width:0;height:0;border:0;right:0;bottom:0';
+  document.body.appendChild(f);
+  const d = f.contentWindow.document;
+  d.open(); d.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+  @page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Tahoma,Arial,sans-serif;color:#0f172a;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .hd{display:flex;align-items:center;gap:12px;border-bottom:2px solid #1e3a8a;padding-bottom:8px;margin-bottom:10px}.hd img{height:56px}.hd h1{font-size:16px;margin:0}.hd p{margin:2px 0;color:#475569}
+  h2{font-size:14px;margin:14px 0 6px;color:#1e3a8a}.kp{display:flex;gap:8px;margin:8px 0}.kp div{flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:8px;text-align:center}.kp b{display:block;font-size:20px}
+  table{width:100%;border-collapse:collapse;margin-top:6px}th,td{border:1px solid #cbd5e1;padding:4px 6px;text-align:right}th{background:#e2e8f0}tr{break-inside:avoid}
+  .ch{break-inside:avoid}.row2{display:flex;gap:12px}.row2>div{flex:1}.ft{margin-top:14px;border-top:1px solid #cbd5e1;padding-top:6px;color:#64748b;font-size:10px;text-align:center}
+  .lg{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;margin-top:4px}.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-left:4px}
+  </style></head><body>${body}</body></html>`); d.close();
+  const go = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('تعذّرت الطباعة', true); } };
+  setTimeout(go, 400);
+}
+const SVGF = 'font-family="Tahoma,Arial,sans-serif"';
+function svgBars(items, o) { // أعمدة أفقية: items=[{label,value(%),text}]
+  const S = settings(), W = 520, rowH = 24, left = 150, max = Math.max(30, S.banPct * 1.5, ...items.map(i => i.value)), h = items.length * rowH + 22;
+  const x = v => left + (W - left - 40) * v / max;
+  return `<svg viewBox="0 0 ${W} ${h}" width="100%" style="direction:ltr;max-width:620px;display:block;margin:auto" ${SVGF}>${items.map((i, k) => { const y = 14 + k * rowH, col = i.value >= S.banPct ? '#dc2626' : i.value >= S.warnPct ? '#d97706' : '#2563eb';
+    return `<text x="${left - 6}" y="${y + 12}" text-anchor="end" font-size="10.5" fill="#0f172a">${esc(i.label.length > 24 ? i.label.slice(0, 23) + '…' : i.label)}</text><rect x="${left}" y="${y}" width="${Math.max(1, x(i.value) - left)}" height="15" rx="3" fill="${col}"/><text x="${x(i.value) + 4}" y="${y + 12}" font-size="10.5" fill="#0f172a">${i.value.toFixed(1)}%</text>`; }).join('')}
+   <line x1="${x(S.warnPct)}" x2="${x(S.warnPct)}" y1="6" y2="${h - 8}" stroke="#d97706" stroke-dasharray="4 3"/><text x="${x(S.warnPct)}" y="${h - 1}" font-size="9" text-anchor="middle" fill="#92400e" style="unicode-bidi:plaintext">إنذار ${S.warnPct}%</text>
+   <line x1="${x(S.banPct)}" x2="${x(S.banPct)}" y1="6" y2="${h - 8}" stroke="#dc2626" stroke-dasharray="4 3"/><text x="${x(S.banPct)}" y="${h - 1}" font-size="9" text-anchor="middle" fill="#991b1b" style="unicode-bidi:plaintext">حرمان ${S.banPct}%</text></svg>`;
+}
+function svgCols(items, color) { // أعمدة رأسية: items=[{label,value}]
+  const W = 520, H = 170, pl = 28, pb = 28, max = Math.max(1, ...items.map(i => i.value)), bw = Math.min(48, (W - pl) / Math.max(1, items.length) - 10);
+  const step = (W - pl) / Math.max(1, items.length);
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="direction:ltr;max-width:620px;display:block;margin:auto" ${SVGF}><line x1="${pl}" x2="${W}" y1="${H - pb}" y2="${H - pb}" stroke="#94a3b8"/>${items.map((i, k) => { const bh = (H - pb - 20) * i.value / max, x = pl + step * k + (step - bw) / 2;
+    return `<rect x="${x}" y="${H - pb - bh}" width="${bw}" height="${bh}" rx="3" fill="${color}"/><text x="${x + bw / 2}" y="${H - pb - bh - 4}" font-size="10.5" text-anchor="middle">${+i.value.toFixed(1)}</text><text x="${x + bw / 2}" y="${H - 10}" font-size="10" text-anchor="middle">${esc(i.label)}</text>`; }).join('')}</svg>`;
+}
+function svgDonut(items) {
+  const tot = items.reduce((n, i) => n + i.value, 0); if (!tot) return '<p>لا توجد غيابات مسجلة</p>';
+  const R = 60, r = 36, cx = 80, cy = 75; let a0 = -Math.PI / 2, paths = '';
+  items.filter(i => i.value).forEach(i => { const a1 = a0 + i.value / tot * Math.PI * 2 - (items.filter(z => z.value).length > 1 ? 0.02 : 0), big = a1 - a0 > Math.PI ? 1 : 0, P = (R_, a) => [cx + R_ * Math.cos(a), cy + R_ * Math.sin(a)];
+    const [x1, y1] = P(R, a0), [x2, y2] = P(R, a1), [x3, y3] = P(r, a1), [x4, y4] = P(r, a0);
+    paths += i.value === tot ? `<circle cx="${cx}" cy="${cy}" r="${(R + r) / 2}" fill="none" stroke="${i.color}" stroke-width="${R - r}"/>` : `<path d="M${x1} ${y1}A${R} ${R} 0 ${big} 1 ${x2} ${y2}L${x3} ${y3}A${r} ${r} 0 ${big} 0 ${x4} ${y4}Z" fill="${i.color}"/>`; a0 += i.value / tot * Math.PI * 2; });
+  return `<svg viewBox="0 0 420 150" width="100%" style="direction:ltr;max-width:620px;display:block;margin:auto" ${SVGF}>${paths}<text x="${cx}" y="${cy + 5}" text-anchor="middle" font-size="16" font-weight="bold">${tot}</text>
+   ${items.map((i, k) => `<rect x="170" y="${20 + k * 24}" width="11" height="11" rx="2" fill="${i.color}"/><text x="186" y="${30 + k * 24}" font-size="11" style="unicode-bidi:plaintext">${esc(i.label)}: ${i.value} (${(i.value / tot * 100).toFixed(0)}%)</text>`).join('')}</svg>`;
+}
+function printReport(C, rows) {
+  const S = settings(), u = me();
+  const subs = C.bySub.map(b => ({ label: b.sb.name, value: b.total ? b.absent / b.total * 100 : 0 })).sort((a, b) => b.value - a.value);
+  const stg = {}; C.rows.forEach(r => { const g = stg[r.st.stage] = stg[r.st.stage] || { w: 0, t: 0 }; g.w += r.weighted; g.t += r.total; });
+  const stages = Object.keys(stg).sort().map(k => ({ label: 'المرحلة ' + (STAGE[k] || k), value: stg[k].t ? stg[k].w / stg[k].t * 100 : 0 }));
+  const cnt = st => C.abs.filter(a => a.status === st).length;
+  const donut = [{ label: STATUS.absent, value: cnt('absent'), color: '#2563eb' }, { label: STATUS.excused, value: cnt('excused'), color: '#0f766e' }, { label: STATUS.pfirst, value: cnt('pfirst'), color: '#7c3aed' }, { label: STATUS.plast, value: cnt('plast'), color: '#c026d3' }];
+  const mon = {}; C.abs.filter(a => a.status === 'absent').forEach(a => { const m = a.date.slice(0, 7); mon[m] = (mon[m] || 0) + 1; });
+  const months = Object.keys(mon).sort().map(m => ({ label: m, value: mon[m] }));
+  const totAbs = C.rows.reduce((n, r) => n + r.weighted, 0), totPos = C.rows.reduce((n, r) => n + r.total, 0);
+  const bad = C.rows.filter(r => r.level === 'warn' || r.level === 'ban').sort((a, b) => b.pct - a.pct);
+  const filt = [rf.dept && deptName(rf.dept), rf.stage && 'المرحلة ' + STAGE[rf.stage], rf.subject && subjectName(rf.subject), rf.section && 'شعبة ' + rf.section, rf.type && TYPE[rf.type], rf.from && 'من ' + rf.from, rf.to && 'إلى ' + rf.to].filter(Boolean).join(' · ') || 'كل البيانات';
+  const dept = rf.dept ? deptName(rf.dept) : (u.role === 'admin' ? '' : deptName(u.deptId));
+  printHtml('تقرير الغياب', `<div class="hd"><img src="${new URL('logo.png', location.href).href}" onerror="this.remove()"><div><h1>${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}</h1><p>تقرير الغياب الرسومي ${dept ? '— ' + esc(dept) : ''}</p><p>${esc(filt)} · تاريخ الإصدار ${today()}</p></div></div>
+  <div class="kp"><div><b>${C.sessions.length}</b>محاضرات مسجلة</div><div><b>${+totAbs.toFixed(1)}</b>إجمالي الغيابات (موزون)</div><div><b>${totPos ? (totAbs / totPos * 100).toFixed(1) : 0}%</b>نسبة الغياب العامة</div><div><b>${bad.length}</b>إنذار/حرمان</div></div>
+  <div class="ch"><h2>نسبة الغياب حسب المادة</h2>${subs.length ? svgBars(subs) : '<p>لا بيانات</p>'}</div>
+  <div class="row2"><div class="ch"><h2>نسبة الغياب حسب المرحلة (%)</h2>${stages.length ? svgCols(stages, '#2563eb') : '<p>لا بيانات</p>'}</div><div class="ch"><h2>توزيع الحالات المسجلة</h2>${svgDonut(donut)}</div></div>
+  <div class="ch"><h2>عدد الغيابات شهرياً</h2>${months.length ? svgCols(months, '#2563eb') : '<p>لا بيانات</p>'}</div>
+  <h2>الطلبة المنذَرون والمحرومون (${bad.length})</h2><table><thead><tr><th>#</th><th>الطالب</th><th>المرحلة</th><th>الشعبة</th><th>المقررة</th><th>غياب</th><th>النسبة</th><th>الحالة</th></tr></thead><tbody>${bad.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.st.name)}</td><td>${STAGE[r.st.stage] || ''}</td><td>${esc(r.st.section || '')}</td><td>${r.total}</td><td>${+r.weighted.toFixed(1)}</td><td>${r.pct.toFixed(1)}%</td><td style="color:${r.level === 'ban' ? '#dc2626' : '#b45309'};font-weight:bold">${LEVEL[r.level][1]}</td></tr>`).join('') || '<tr><td colspan="8">لا يوجد</td></tr>'}</tbody></table>
+  <p class="muted">الإنذار عند ${S.warnPct}% والحرمان عند ${S.banPct}% — حضور ساعة واحدة يُحتسب بوزن ${S.partialWeight}.</p>
+  <div class="ft">${esc(CFG.AUTHOR || '')} · ${esc(CFG.AUTHOR_PHONE || '')}</div>`);
 }
 function studentDetail(id) {
   const st = get('students', id);
@@ -398,7 +485,6 @@ const deptField = () => multiDept() ? [{ key: 'deptId', label: 'القسم / ا�
 const myDeptFilter = r => isAdmin() || myDepts().includes(r.deptId);
 
 const STAFF_IMP = { title: 'الكادر', impHelp: 'الأعمدة بالترتيب: <b>الاسم، النوع (تدريسي / مسؤول مختبر / فني / رئيس قسم / مقرر قسم)، الهاتف، الأقسام (يفصل بينها فاصلة عربية «،»)، اسم المستخدم، كلمة المرور</b> (الحسابات يضيفها مدير النظام فقط).', needDept: false };
-const LSCOPE = { student: 'طالب محدد', stage: 'مرحلة كاملة', dept: 'كل طلبة القسم' };
 const MANAGE = {
   students: {
     title: 'طالب', table: 'students', stageFilter: true,
@@ -443,26 +529,9 @@ const MANAGE = {
   },
   leaves: {
     title: 'إجازة', table: 'leaves',
-    cols: [['المشمول', r => esc(r.name || '') + ' <span class="muted">(' + LSCOPE[r.scope] + ')</span>'], ['من', r => esc(r.from)], ['إلى', r => esc(r.to)], ['السبب', r => esc(r.reason || '')], ['القسم', r => esc(deptName(r.deptId))]],
-    fields: () => [{ key: 'scope', label: 'نوع الإجازة', type: 'select', blank: false, required: true, def: 'student', options: Object.entries(LSCOPE) },
-      { key: 'who', label: 'اسم الطالب أو رقمه الجامعي (لإجازة الطالب فقط)' },
-      { key: 'stage', label: 'المرحلة (لإجازة المرحلة فقط)', type: 'select', options: optStages() },
-      { key: 'from', label: 'من تاريخ', type: 'date', required: true }, { key: 'to', label: 'إلى تاريخ', type: 'date', required: true },
-      { key: 'reason', label: 'السبب (اختياري، لا يظهر للتدريسي)' }, ...deptField()],
-    perm: 'manageLeaves',
-    expHead: ['المشمول', 'النوع', 'من', 'إلى', 'السبب'], expRow: r => [r.name, LSCOPE[r.scope], r.from, r.to, r.reason || ''],
-    clean: v => { v.stage = v.stage ? Number(v.stage) : ''; return v; },
-    prepare: (out, rec) => {
-      if (out.to < out.from) throw new Error('تاريخ النهاية قبل البداية');
-      if (out.scope === 'student') {
-        const q = String(out.who || (rec && rec.name) || '').trim(); if (!q) throw new Error('اكتب اسم الطالب أو رقمه الجامعي');
-        const m = live('students').filter(x => x.deptId === out.deptId && (x.name === q || (x.studentNo && x.studentNo === q)));
-        if (!m.length) throw new Error('لم يُعثر على طالب بهذا الاسم أو الرقم في القسم'); if (m.length > 1) throw new Error('يوجد أكثر من طالب بهذا الاسم، استخدم الرقم الجامعي');
-        out.studentId = m[0].id; out.name = m[0].name; out.stage = m[0].stage; out.section = m[0].section || '';
-      } else if (out.scope === 'stage') { if (!out.stage) throw new Error('اختر المرحلة'); out.name = 'المرحلة ' + STAGE[out.stage]; out.studentId = ''; out.section = ''; }
-      else { out.name = 'كل طلبة القسم'; out.studentId = ''; out.stage = ''; out.section = ''; }
-      delete out.who;
-    }
+    cols: [['الطالب', r => esc(r.name || '')], ['المرحلة', r => STAGE[r.stage] || ''], ['من', r => esc(r.from)], ['إلى', r => esc(r.to)], ['السبب', r => esc(r.reason || '')], ['القسم', r => esc(deptName(r.deptId))]],
+    fields: () => [], perm: 'manageLeaves',
+    expHead: ['الطالب', 'المرحلة', 'الشعبة', 'من', 'إلى', 'السبب'], expRow: r => [r.name, STAGE[r.stage] || '', r.section || '', r.from, r.to, r.reason || ''], impHelp: ''
   },
   branches: {
     title: 'فرع', table: 'departments', noDept: true, rowFilter: r => r.parentId === me().deptId,
@@ -515,11 +584,56 @@ function manageScreen(kind) {
     el.querySelectorAll('[data-e]').forEach(b => b.onclick = () => editRec(kind, get(C.table, b.dataset.e), el));
     el.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => {
       if (!confirm('تأكيد الحذف؟ (تبقى الغيابات المسجلة سابقاً في السجل)')) return;
-      await removeRec(C.table, get(C.table, b.dataset.d)); manageScreen(kind)(el);
+      const old = get(C.table, b.dataset.d); await removeRec(C.table, old); if (kind === 'leaves') await applyLeaveLocal(Object.assign({}, old, { deleted: true })); manageScreen(kind)(el);
     });
   };
 }
+
+/* ---------- الإجازات: بحث باسم الطالب + تحويل الغياب إلى مجاز ---------- */
+async function applyLeaveLocal(lv) {
+  const out = [];
+  live('absences').forEach(a => {
+    const inside = !lv.deleted && a.studentId === lv.studentId && a.date >= lv.from && a.date <= lv.to;
+    if (a.byLeave === lv.id && !inside) { const b = Object.assign({}, a, { status: a.prevStatus || 'absent' }); delete b.byLeave; delete b.prevStatus; out.push(b); }
+    else if (!a.byLeave && inside && a.status === 'absent') out.push(Object.assign({}, a, { prevStatus: 'absent', status: 'excused', byLeave: lv.id }));
+  });
+  if (out.length) await saveRecs('absences', out);
+  return out.length;
+}
+function leaveForm(rec, el) {
+  let sel = rec ? get('students', rec.studentId) : null;
+  const pool = () => live('students').filter(myDeptFilter);
+  const card = () => sel ? `<div class="chosen"><b>${esc(sel.name)}</b> — المرحلة ${STAGE[sel.stage] || ''}${sel.section ? ' — شعبة ' + esc(sel.section) : ''}${sel.studentNo ? ' — رقم ' + esc(sel.studentNo) : ''} — ${esc(deptName(sel.deptId))}</div>` : '<div class="muted">ابحث عن الطالب واختره (تُملأ بياناته تلقائياً)</div>';
+  showModal(rec ? 'تعديل إجازة' : 'إضافة إجازة', `<form id="mform"><label class="f">بحث باسم الطالب أو رقمه<input id="lvQ" autocomplete="off" placeholder="اكتب جزءاً من الاسم"></label>
+   <div id="lvRes" class="lvres"></div><div id="lvSel">${card()}</div>
+   <label class="f">من تاريخ<input type="date" name="from" required value="${rec ? rec.from : today()}"></label>
+   <label class="f">إلى تاريخ<input type="date" name="to" required value="${rec ? rec.to : today()}"></label>
+   <label class="f">السبب (اختياري، لا يظهر للتدريسي)<input name="reason" value="${esc(rec ? rec.reason || '' : '')}"></label>
+   <p class="muted">عند الحفظ يتحول غياب الطالب ضمن هذه الفترة إلى «مجاز» تلقائياً، حتى لو سُجّل الغياب قبل الإجازة.</p>
+   <div class="row end"><button type="button" class="btn ghost" data-close>إلغاء</button><button class="btn">حفظ</button></div></form>`);
+  const paint = () => {
+    const q = $('#lvQ').value.trim(); const box = $('#lvRes');
+    if (!q) { box.innerHTML = ''; return; }
+    const m = pool().filter(x => (x.name + ' ' + (x.studentNo || '')).includes(q)).sort(byName).slice(0, 8);
+    box.innerHTML = m.map(x => `<div class="lvopt" data-s="${x.id}">${esc(x.name)} <span class="muted">${STAGE[x.stage] || ''}${x.section ? ' / ' + esc(x.section) : ''} — ${esc(deptName(x.deptId))}</span></div>`).join('') || '<div class="muted">لا نتائج</div>';
+  };
+  $('#lvQ').oninput = paint;
+  $('#lvRes').onclick = e => { const o = e.target.closest('[data-s]'); if (!o) return; sel = get('students', o.dataset.s); $('#lvSel').innerHTML = card(); $('#lvRes').innerHTML = ''; $('#lvQ').value = ''; };
+  $('#mform').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      if (!sel) throw new Error('اختر الطالب أولاً');
+      const f = e.target; const from = f.from.value, to = f.to.value;
+      if (!from || !to) throw new Error('حدد التاريخين'); if (to < from) throw new Error('تاريخ النهاية قبل البداية');
+      const out = Object.assign(rec ? Object.assign({}, rec) : { id: uid('l'), deleted: false }, { scope: 'student', studentId: sel.id, name: sel.name, stage: sel.stage, section: sel.section || '', deptId: sel.deptId, from, to, reason: f.reason.value.trim() });
+      await saveRec('leaves', out);
+      const n = await applyLeaveLocal(out);
+      closeModal(); toast('تم الحفظ' + (n ? ' — تحويل ' + n + ' غياب إلى مجاز' : '')); manageScreen('leaves')(el);
+    } catch (err) { toast(err.message, true); }
+  };
+}
 function editRec(kind, rec, el) {
+  if (kind === 'leaves') return leaveForm(rec, el);
   const C = MANAGE[kind];
   openForm({
     title: (rec ? 'تعديل ' : 'إضافة ') + C.title, fields: C.fields(rec), values: rec ? Object.assign({}, rec, kind === 'leaves' ? { who: rec.scope === 'student' ? rec.name : '' } : (kind === 'users' ? { teacherIds: rec.teacherIds && rec.teacherIds.length ? rec.teacherIds : (rec.teacherId ? [rec.teacherId] : []) } : {})) : { active: true },
