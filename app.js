@@ -5,7 +5,7 @@ const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'ف�
 const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '1.9';
+const APP_BUILD = '2.0';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
