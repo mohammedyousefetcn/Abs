@@ -5,7 +5,7 @@ const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'ف�
 const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '1.6';
+const APP_BUILD = '1.7';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
@@ -57,11 +57,11 @@ function toast(msg, err) {
 
 /* ---------- النوافذ ---------- */
 function showModal(title, html, wide) {
-  modalOpen = true;
+  modalOpen = true; document.body.classList.add('mopen');
   $('#modalRoot').innerHTML = `<div class="ov"><div class="modal ${wide ? 'wide' : ''}"><h3>${esc(title)}</h3>${html}</div></div>`;
   $('#modalRoot').onclick = e => { if (e.target.matches('[data-close]') || e.target.classList.contains('ov')) closeModal(); };
 }
-function closeModal() { modalOpen = false; $('#modalRoot').innerHTML = ''; }
+function closeModal() { modalOpen = false; document.body.classList.remove('mopen'); $('#modalRoot').innerHTML = ''; }
 
 function fieldHtml(f, v) {
   const req = f.required ? ' required' : '';
@@ -69,7 +69,7 @@ function fieldHtml(f, v) {
   if (f.type === 'select')
     return `<label class="f">${f.label}<select name="${f.key}"${req}>${f.blank !== false ? '<option value="">—</option>' : ''}${f.options.map(o => `<option value="${esc(o[0])}"${String(o[0]) === String(val) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`;
   if (f.type === 'multi') { const sel = Array.isArray(v) ? v : []; return `<label class="f">${f.label}<select name="${f.key}" multiple size="6">${f.options.map(o => `<option value="${esc(o[0])}"${sel.includes(o[0]) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`; }
-  if (f.type === 'checks') { const sel = Array.isArray(v) ? v : []; return `<div class="f"><span>${f.label}</span><div class="checks">${f.options.map(o => `<label class="chk"><input type="checkbox" data-ck="${f.key}" value="${esc(o[0])}"${sel.includes(o[0]) ? ' checked' : ''}> ${esc(o[1])}</label>`).join('')}</div></div>`; }
+  if (f.type === 'checks') { const sel = Array.isArray(v) ? v : []; if (!f.options.length) return `<div class="f"><span>${f.label}</span><div class="checks"><b style="color:#dc2626">لا توجد أقسام بعد. أضِف قسماً من صفحة «الأقسام» أولاً.</b></div></div>`; return `<div class="f"><span>${f.label}</span><div class="checks">${f.options.map(o => `<label class="chk"><input type="checkbox" data-ck="${f.key}" value="${esc(o[0])}"${sel.includes(o[0]) ? ' checked' : ''}> ${esc(o[1])}</label>`).join('')}</div></div>`; }
   if (f.type === 'checkbox')
     return `<label class="f chk"><input type="checkbox" name="${f.key}"${val ? ' checked' : ''}> ${f.label}</label>`;
   if (f.type === 'textarea')
