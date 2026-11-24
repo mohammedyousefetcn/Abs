@@ -6,5 +6,5 @@ window.APP_CONFIG = {
   AUTHOR: 'م.محمد يعقوب يوسف',
   AUTHOR_PHONE: '07811181303',
   AUTHOR_EMAIL: 'mohammed.yaqoub@atu.edu.iq',
-  VERSION: '2.0'
+  VERSION: '2.1'
 };
