@@ -3,13 +3,14 @@ const ROLE = { admin: 'مدير النظام', head: 'رئيس القسم', rapp
 const TYPE = { theory: 'نظري', lab: 'عملي' };
 const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
-const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', late: 'متأخر', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', late: 'متأخر', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
-const BADGE = { absent: 'bad', excused: 'exc', late: 'warn', pfirst: 'part', plast: 'part' };
+const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
+const APP_BUILD = '1.4';
+const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
+const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
 const CFG = window.APP_CONFIG || {};
 const ACTIONS = [['manageStudents', 'إدارة الطلبة (إضافة / تعديل / حذف)'], ['manageTeachers', 'إدارة التدريسيين ومسؤولي المختبرات'], ['manageSubjects', 'إدارة المواد وتخصيصها'],
-  ['recordAttendance', 'تسجيل الغياب'], ['editAttendance', 'تعديل حضور محاضرة مسجّلة سابقاً'], ['deleteAttendance', 'حذف محاضرة مسجّلة'], ['viewAudit', 'عرض سجل التعديلات'], ['manageLeaves', 'إدخال الإجازات (لطالب أو مرحلة أو قسم لفترة من تاريخ إلى تاريخ)'], ['viewReports', 'عرض التقارير ولوحة المتابعة'], ['exportData', 'تصدير البيانات'], ['importData', 'استيراد البيانات']];
+  ['recordAttendance', 'تسجيل الغياب'], ['editAttendance', 'تعديل حضور محاضرة مسجّلة سابقاً'], ['deleteAttendance', 'حذف محاضرة مسجّلة'], ['viewAudit', 'عرض سجل التعديلات'], ['manageLeaves', 'إدخال الإجازات (لطالب أو مرحلة أو قسم لفترة من تاريخ إلى تاريخ)'], ['manageBranches', 'إدارة فروع القسم (إضافة / تعديل / حذف)'], ['viewReports', 'عرض التقارير ولوحة المتابعة'], ['exportData', 'تصدير البيانات'], ['importData', 'استيراد البيانات']];
 const ALL_ON = Object.fromEntries(ACTIONS.map(a => [a[0], true]));
 const DEFAULT_PERMS = {
   head: ALL_ON,
@@ -34,10 +35,13 @@ const deptName = id => (get('departments', id) || {}).name || '—';
 const teacherName = id => (get('teachers', id) || {}).name || '—';
 const subjectName = id => (get('subjects', id) || {}).name || '—';
 const planOf = (s, t) => Number(t === 'lab' ? (s.labCount == null ? 0 : s.labCount) : (s.theoryCount == null ? 15 : s.theoryCount)) || 0;
+const myTIds = () => { const u = me(); const a = (u.teacherIds || []).slice(); if (u.teacherId && !a.includes(u.teacherId)) a.push(u.teacherId); return a; };
+const isMineStaff = ids => ids.some(x => x && myTIds().includes(x));
+const myDepts = () => { const u = me(); if (u.role === 'admin') return live('departments').map(d => d.id); const a = new Set([u.deptId]); live('departments').forEach(d => { if (d.parentId === u.deptId) a.add(d.id); }); return [...a].filter(Boolean); };
 const staffOf = (s, t) => t === 'lab' ? [s.labId, s.labAltId] : [s.teacherId, s.teacherAltId];
 function typesFor(s) {
   const u = me();
-  return ['theory', 'lab'].filter(t => planOf(s, t) > 0 && (u.role !== 'teacher' || (u.teacherId && staffOf(s, t).includes(u.teacherId))));
+  return ['theory', 'lab'].filter(t => planOf(s, t) > 0 && (u.role !== 'teacher' || isMineStaff(staffOf(s, t))));
 }
 const settings = () => Object.assign({ warnPct: 10, banPct: 20, partialWeight: 0.5 }, get('settings', 'main') || {});
 const optStages = () => Object.entries(STAGE).map(([v, l]) => [v, l]);
@@ -63,6 +67,7 @@ function fieldHtml(f, v) {
   const val = v == null ? (f.def == null ? '' : f.def) : v;
   if (f.type === 'select')
     return `<label class="f">${f.label}<select name="${f.key}"${req}>${f.blank !== false ? '<option value="">—</option>' : ''}${f.options.map(o => `<option value="${esc(o[0])}"${String(o[0]) === String(val) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`;
+  if (f.type === 'multi') { const sel = Array.isArray(v) ? v : []; return `<label class="f">${f.label}<select name="${f.key}" multiple size="6">${f.options.map(o => `<option value="${esc(o[0])}"${sel.includes(o[0]) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`; }
   if (f.type === 'checkbox')
     return `<label class="f chk"><input type="checkbox" name="${f.key}"${val ? ' checked' : ''}> ${f.label}</label>`;
   if (f.type === 'textarea')
@@ -77,7 +82,7 @@ function openForm({ title, fields, values, onSave }) {
     const v = {};
     fields.forEach(f => {
       const el = $('#mform [name="' + f.key + '"]');
-      v[f.key] = f.type === 'checkbox' ? el.checked : (f.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : el.value.trim());
+      v[f.key] = f.type === 'multi' ? [...el.selectedOptions].map(o => o.value) : f.type === 'checkbox' ? el.checked : (f.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : el.value.trim());
     });
     try { if ((await onSave(v)) !== false) closeModal(); } catch (err) { toast(err.message, true); }
   };
@@ -92,13 +97,14 @@ function navItems() {
   if (can('manageTeachers')) n.push(['teachers', 'التدريسيون ومسؤولو المختبرات']);
   if (can('manageSubjects')) n.push(['subjects', 'المواد الدراسية']);
   if (can('manageLeaves')) n.push(['leaves', 'الإجازات']);
+  if (!isAdmin() && can('manageBranches') && !(get('departments', me().deptId) || {}).parentId) n.push(['branches', 'فروع القسم']);
   if (can('viewAudit')) n.push(['audit', 'سجل التعديلات']);
   if (isAdmin()) n.push(['users', 'المستخدمون وكلمات المرور'], ['departments', 'الأقسام'], ['permissions', 'تحديد الصلاحيات']);
   n.push(['settings', 'الإعدادات والحساب']);
   return n;
 }
 const waLink = () => CFG.AUTHOR_PHONE ? `<a href="https://wa.me/${'964' + String(CFG.AUTHOR_PHONE).replace(/^0/, '')}" target="_blank" rel="noopener" dir="ltr">${esc(CFG.AUTHOR_PHONE)} (واتساب)</a>` : '';
-const footer = () => `<div class="foot">${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>تصميم وتطوير: ${esc(CFG.AUTHOR || '')} · <span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span> · ${waLink()} · الإصدار ${esc(CFG.VERSION || '')}</div>`;
+const footer = () => `<div class="foot">${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>تصميم وتطوير: ${esc(CFG.AUTHOR || '')} · <span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span> · ${waLink()} · الإصدار ${esc(APP_BUILD)}${CFG.VERSION !== APP_BUILD ? ' ⚠' : ''}</div>`;
 const logoImg = () => '<img src="logo.png" class="logo" alt="" onerror="this.remove()">';
 function renderShell() {
   $('#app').innerHTML = `<div class="shell">
@@ -155,7 +161,7 @@ function renderLogin(msg) {
 /* ---------- الرئيسية ---------- */
 const mySubjects = () => {
   const u = me();
-  return live('subjects').filter(s => (u.role === 'admin' || (u.role === 'teacher' ? true : s.deptId === u.deptId)) && typesFor(s).length).sort(byName);
+  return live('subjects').filter(s => (u.role === 'admin' || (u.role === 'teacher' ? true : myDepts().includes(s.deptId))) && typesFor(s).length).sort(byName);
 };
 const attPairs = () => { const o = []; mySubjects().forEach(s => typesFor(s).forEach(t => o.push([s, t]))); return o; };
 const sessKey = (sid, type, no, sec) => [sid, type, no, sec || ''].join('|');
@@ -171,7 +177,7 @@ function homeScreen(el) {
   const pairs = attPairs();
   const isStaff = me().role === 'teacher';
   const cards = pairs.map(([s, ty]) => {
-    const alt = isStaff && staffOf(s, ty)[1] === me().teacherId && staffOf(s, ty)[0] !== me().teacherId;
+    const alt = isStaff && isMineStaff([staffOf(s, ty)[1]]) && !isMineStaff([staffOf(s, ty)[0]]);
     return `<div class="mycard" data-att="${s.id}|${ty}"><div class="mc-name">${esc(s.name)}</div>
      <div class="mc-sub"><span class="badge ${ty === 'lab' ? 'exc' : 'ok'}">${TYPE[ty]}</span>${alt ? ' <span class="badge warn">بديل</span>' : ''} المرحلة ${STAGE[s.stage] || ''}${s.section ? ' — شعبة ' + esc(s.section) : ''}</div>
      <div class="mc-sub">سُجّلت ${recordedCount(s.id, ty)} من ${planOf(s, ty)} محاضرة</div><button class="btn">تسجيل الغياب</button></div>`;
@@ -221,8 +227,8 @@ function attendScreen(el) {
   const sections = [...new Set(live('students').filter(x => x.deptId === s.deptId && String(x.stage) === String(s.stage)).map(x => x.section).filter(Boolean))].sort();
   const list = studentsOf(s, att.section);
   const q = att.q.trim();
-  const cnt = { absent: 0, excused: 0, late: 0, part: 0 };
-  list.forEach(x => { const st = att.states[x.id]; if (isPartial(st)) cnt.part++; else if (cnt[st] != null) cnt[st]++; });
+  const cnt = { absent: 0, excused: 0, pfirst: 0, plast: 0 };
+  list.forEach(x => { const st = att.states[x.id]; if (cnt[st] != null) cnt[st]++; });
   const locked = att.existing && !can('editAttendance');
   const recd = new Map();
   live('sessions').filter(x => x.subjectId === s.id && (x.type || 'theory') === att.type && (x.section || '') === att.section).forEach(x => recd.set(x.lectureNo, x));
@@ -241,7 +247,7 @@ function attendScreen(el) {
    <div class="filters" style="padding:10px;margin:0"><input type="search" id="aQ" placeholder="بحث عن طالب…" value="${esc(att.q)}"><button class="btn ghost sm" id="aAll">الكل حاضر</button></div>
    ${list.length ? `<div class="bhead"><span class="n"></span><span class="nm"></span>${Object.keys(STATUS).map(k => `<span class="bc">${BSHORT[k]}</span>`).join('')}</div>` : ''}
    <div id="aList">${list.length ? list.filter(x => !q || x.name.includes(q)).map((x, i) => { const cur = att.states[x.id] || 'present'; return `<div class="stu ${att.states[x.id] || ''}" data-id="${x.id}"><span class="n">${i + 1}</span><span class="nm">${esc(x.name)}${x.section ? ' <span class="muted">(' + esc(x.section) + ')</span>' : ''}${leaveFor(x, att.date) ? ' <span class="badge exc">إجازة</span>' : ''}</span>${Object.keys(STATUS).map(k => `<span class="bc"><span class="bub b-${k}${k === cur ? ' on' : ''}" data-s="${k}" role="radio" aria-checked="${k === cur}" aria-label="${STATUS[k]}"></span></span>`).join('')}</div>`; }).join('') : '<div class="empty">لا يوجد طلبة مطابقون لهذه المادة/المرحلة/الشعبة.</div>'}</div>
-   <div class="sticky-save"><span>غائب <b>${cnt.absent}</b> · جزئي <b>${cnt.part}</b> · مجاز <b>${cnt.excused}</b> · متأخر <b>${cnt.late}</b> · من ${list.length}</span><span class="grow"></span>
+   <div class="sticky-save"><span>غائب <b>${cnt.absent}</b> · مجاز <b>${cnt.excused}</b> · أول ساعة <b>${cnt.pfirst}</b> · آخر ساعة <b>${cnt.plast}</b> · من ${list.length}</span><span class="grow"></span>
     ${can('exportData') ? '<button class="btn ghost sm" id="aExp">تصدير الكشف</button>' : ''}${att.existing && can('deleteAttendance') ? '<button class="btn danger sm" id="aDel">حذف المحاضرة</button>' : ''}${locked ? '' : `<button class="btn" id="aSave">${att.existing ? 'حفظ التعديل' : 'حفظ المحاضرة'}</button>`}</div></div>`;
   const rerender = () => attendScreen(el);
   $('#aSub').onchange = e => { const [id, ty] = e.target.value.split('|'); attInit(id, ty); rerender(); };
@@ -295,8 +301,8 @@ async function attDelete(s) {
 let rf = { type: '', dept: '', stage: '', subject: '', section: '', from: '', to: '', level: '', q: '', limit: 100 };
 function calc(f) {
   const u = me();
-  const dept = u.role === 'admin' ? f.dept : u.deptId;
-  const subs = live('subjects').filter(s => (!dept || s.deptId === dept) && (!f.stage || String(s.stage) === f.stage) && (!f.subject || s.id === f.subject) && (u.role !== 'teacher' || s.teacherId === u.teacherId));
+  const dept = f.dept && (u.role === 'admin' || myDepts().includes(f.dept)) ? f.dept : '';
+  const subs = live('subjects').filter(s => (dept ? s.deptId === dept : (u.role === 'admin' || u.role === 'teacher' || myDepts().includes(s.deptId))) && (!f.stage || String(s.stage) === f.stage) && (!f.subject || s.id === f.subject) && (u.role !== 'teacher' || isMineStaff([s.teacherId, s.teacherAltId, s.labId, s.labAltId])));
   const subIds = new Set(subs.map(s => s.id));
   const inRange = d => (!f.from || d >= f.from) && (!f.to || d <= f.to);
   const types = f.type ? [f.type] : ['theory', 'lab'];
@@ -307,7 +313,7 @@ function calc(f) {
   const students = live('students').filter(s => (!dept || s.deptId === dept) && (!f.stage || String(s.stage) === f.stage) && (!f.section || s.section === f.section));
   const per = new Map(), bySub = new Map();
   students.forEach(st => {
-    const row = { st, total: 0, absent: 0, partial: 0, excused: 0, late: 0 };
+    const row = { st, total: 0, absent: 0, partial: 0, pfirst: 0, plast: 0, excused: 0 };
     subs.forEach(sb => {
       if (sb.deptId !== st.deptId || String(sb.stage) !== String(st.stage) || (sb.section && sb.section !== st.section)) return;
       const planned = types.reduce((n, t) => n + planOf(sb, t), 0);
@@ -317,7 +323,7 @@ function calc(f) {
       const pa = list.filter(x => isPartial(x.status)).length;
       row.total += tot; row.absent += a; row.partial += pa;
       row.excused += list.filter(x => x.status === 'excused').length;
-      row.late += list.filter(x => x.status === 'late').length;
+      row.pfirst += list.filter(x => x.status === 'pfirst').length; row.plast += list.filter(x => x.status === 'plast').length;
       const b = bySub.get(sb.id) || { sb, total: 0, absent: 0 }; b.total += tot; b.absent += a + pa * settings().partialWeight; bySub.set(sb.id, b);
     });
     row.weighted = row.absent + row.partial * settings().partialWeight;
@@ -331,7 +337,7 @@ function calc(f) {
 const LEVEL = { ban: ['bad', 'حرمان'], warn: ['warn', 'إنذار'], ok: ['ok', 'سليم'] };
 function reportsScreen(el) {
   const u = me();
-  const dept = u.role === 'admin' ? rf.dept : u.deptId;
+  const dept = rf.dept && (u.role === 'admin' || myDepts().includes(rf.dept)) ? rf.dept : '';
   const subsAll = mySubjects().filter(s => (!dept || s.deptId === dept) && (!rf.stage || String(s.stage) === rf.stage));
   const sections = [...new Set(live('students').filter(x => (!dept || x.deptId === dept) && (!rf.stage || String(x.stage) === rf.stage)).map(x => x.section).filter(Boolean))].sort();
   const C = calc(rf);
@@ -351,13 +357,13 @@ function reportsScreen(el) {
    <select id="fLevel"><option value="">كل الحالات</option><option value="warn"${rf.level === 'warn' ? ' selected' : ''}>إنذار</option><option value="ban"${rf.level === 'ban' ? ' selected' : ''}>حرمان</option></select>
    <input type="search" id="fQ" placeholder="بحث باسم الطالب" value="${esc(rf.q)}"></div>
   <div class="grid kpis"><div class="kpi"><b>${C.sessions.length}</b><span>محاضرات مسجلة</span></div>
-   <div class="kpi"><b>${+totAbs.toFixed(1)}</b><span>إجمالي الغيابات (الجزئي بوزنه)</span></div>
+   <div class="kpi"><b>${+totAbs.toFixed(1)}</b><span>إجمالي الغيابات (حضور ساعة واحدة بوزنه)</span></div>
    <div class="kpi"><b>${totPos ? (totAbs / totPos * 100).toFixed(1) : 0}%</b><span>نسبة الغياب العامة</span></div>
    <div class="kpi"><b>${warnCnt}</b><span>طلبة (إنذار/حرمان)</span></div></div>
   ${C.bySub.length ? `<div class="card" style="margin-top:14px"><h2>نسبة الغياب حسب المادة</h2>${C.bySub.sort((a, b) => b.absent / (b.total || 1) - a.absent / (a.total || 1)).map(b => { const p = b.total ? b.absent / b.total * 100 : 0; const S = settings(); return `<div class="bar"><span class="lb">${esc(b.sb.name)}</span><div class="tr"><div class="fi ${p >= S.banPct ? 'b' : p >= S.warnPct ? 'w' : ''}" style="width:${Math.min(100, p * 2)}%"></div></div><b>${p.toFixed(1)}%</b></div>`; }).join('')}<p class="muted">الإنذار عند ${settings().warnPct}% والحرمان عند ${settings().banPct}% (يغيّرها مدير النظام من الإعدادات).</p></div>` : ''}
   <div class="card" style="padding:0"><div class="row" style="padding:10px"><h2 class="grow" style="margin:0">الطلبة (${rows.length})</h2>${can('exportData') ? '<button class="btn ghost sm" id="fCsv">تصدير الملخص</button><button class="btn ghost sm" id="fDet">تصدير تفصيلي</button>' : ''}</div>
-   <div class="tblwrap"><table><thead><tr><th>الطالب</th><th>المرحلة</th><th>الشعبة</th><th>المقررة</th><th>غياب كامل</th><th>جزئي</th><th>مجاز</th><th>تأخر</th><th>النسبة</th><th>الحالة</th></tr></thead><tbody>
-   ${rows.slice(0, rf.limit).map(r => `<tr data-st="${r.st.id}" style="cursor:pointer"><td>${esc(r.st.name)}</td><td>${STAGE[r.st.stage] || ''}</td><td>${esc(r.st.section || '')}</td><td>${r.total}</td><td>${r.absent}</td><td>${r.partial}</td><td>${r.excused}</td><td>${r.late}</td><td>${r.total ? r.pct.toFixed(1) + '%' : '—'}</td><td>${r.level ? `<span class="badge ${LEVEL[r.level][0]}">${LEVEL[r.level][1]}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="empty">لا توجد بيانات</td></tr>'}</tbody></table></div>
+   <div class="tblwrap"><table><thead><tr><th>الطالب</th><th>المرحلة</th><th>الشعبة</th><th>المقررة</th><th>غياب</th><th>أول ساعة فقط</th><th>آخر ساعة فقط</th><th>مجاز</th><th>النسبة</th><th>الحالة</th></tr></thead><tbody>
+   ${rows.slice(0, rf.limit).map(r => `<tr data-st="${r.st.id}" style="cursor:pointer"><td>${esc(r.st.name)}</td><td>${STAGE[r.st.stage] || ''}</td><td>${esc(r.st.section || '')}</td><td>${r.total}</td><td>${r.absent}</td><td>${r.pfirst}</td><td>${r.plast}</td><td>${r.excused}</td><td>${r.total ? r.pct.toFixed(1) + '%' : '—'}</td><td>${r.level ? `<span class="badge ${LEVEL[r.level][0]}">${LEVEL[r.level][1]}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="empty">لا توجد بيانات</td></tr>'}</tbody></table></div>
    ${rows.length > rf.limit ? '<div class="row end" style="padding:10px"><button class="btn ghost" id="fMore">عرض المزيد</button></div>' : ''}</div>`;
   const bind = (id, key, ev) => { const n = $('#' + id); if (n) n[ev || 'onchange'] = e => { rf[key] = e.target.value; if (key === 'dept' || key === 'stage') rf.subject = ''; rf.limit = 100; reportsScreen(el); }; };
   bind('fDept', 'dept'); bind('fType', 'type'); bind('fStage', 'stage'); bind('fSub', 'subject'); bind('fSec', 'section'); bind('fFrom', 'from'); bind('fTo', 'to'); bind('fLevel', 'level');
@@ -365,7 +371,7 @@ function reportsScreen(el) {
   if ($('#fMore')) $('#fMore').onclick = () => { rf.limit += 200; reportsScreen(el); };
   if ($('#fDet')) $('#fDet').onclick = () => downloadCsv('غيابات-تفصيلي-' + today() + '.csv', [['التاريخ', 'المادة', 'النوع', 'المحاضرة', 'الطالب', 'المرحلة', 'الشعبة', 'الحالة']].concat(C.abs.slice().sort((a, b) => a.date.localeCompare(b.date)).map(a => { const t = get('students', a.studentId) || {}; return [a.date, subjectName(a.subjectId), TYPE[a.type || 'theory'], a.lectureNo || '', t.name || '', STAGE[t.stage] || '', t.section || '', STATUS[a.status] || a.status]; })));
   if ($('#fCsv')) $('#fCsv').onclick = () => downloadCsv('تقرير-الغيابات-' + today() + '.csv',
-    [['الطالب', 'المرحلة', 'الشعبة', 'المحاضرات المقررة', 'غياب كامل', 'جزئي', 'مجاز', 'تأخر', 'النسبة %', 'الحالة']].concat(rows.map(r => [r.st.name, STAGE[r.st.stage] || '', r.st.section || '', r.total, r.absent, r.partial, r.excused, r.late, r.total ? r.pct.toFixed(1) : '', r.level ? LEVEL[r.level][1] : ''])));
+    [['الطالب', 'المرحلة', 'الشعبة', 'المحاضرات المقررة', 'غياب', 'حضر الساعة الأولى فقط', 'حضر الساعة الأخيرة فقط', 'مجاز', 'النسبة %', 'الحالة']].concat(rows.map(r => [r.st.name, STAGE[r.st.stage] || '', r.st.section || '', r.total, r.absent, r.pfirst, r.plast, r.excused, r.total ? r.pct.toFixed(1) : '', r.level ? LEVEL[r.level][1] : ''])));
   el.querySelectorAll('tr[data-st]').forEach(tr => tr.onclick = () => studentDetail(tr.dataset.st));
 }
 function studentDetail(id) {
@@ -380,11 +386,12 @@ function downloadCsv(name, rows) {
 }
 
 /* ---------- شاشات الإدارة العامة ---------- */
-const deptOpts = () => live('departments').sort(byName).map(d => [d.id, d.name]);
-const personOpts = (kind, deptId) => live('teachers').filter(t => (!deptId || t.deptId === deptId) && (!kind || (t.kind || 'teacher') === kind)).sort(byName).map(t => [t.id, t.name]);
-const personOptsAll = deptId => live('teachers').filter(t => !deptId || t.deptId === deptId).sort(byName).map(t => [t.id, t.name + ' (' + KIND[t.kind || 'teacher'] + ')']);
-const deptField = () => isAdmin() ? [{ key: 'deptId', label: 'القسم', type: 'select', options: deptOpts(), required: true, blank: false }] : [];
-const myDeptFilter = r => isAdmin() || r.deptId === me().deptId;
+const deptOpts = () => live('departments').filter(d => isAdmin() || myDepts().includes(d.id)).sort(byName).map(d => [d.id, d.name]);
+const personOpts = (kind, deptId) => live('teachers').filter(t => (!deptId || t.deptId === deptId) && (!kind || (t.kind || 'teacher') === kind)).sort(byName).map(t => [t.id, deptId ? t.name : t.name + ' — ' + deptName(t.deptId)]);
+const personOptsAll = deptId => live('teachers').filter(t => !deptId || t.deptId === deptId).sort(byName).map(t => [t.id, t.name + ' (' + KIND[t.kind || 'teacher'] + ') — ' + deptName(t.deptId)]);
+const multiDept = () => isAdmin() || myDepts().length > 1;
+const deptField = () => multiDept() ? [{ key: 'deptId', label: 'القسم / الفرع', type: 'select', options: deptOpts(), required: true, blank: false, def: isAdmin() ? '' : me().deptId }] : [];
+const myDeptFilter = r => isAdmin() || myDepts().includes(r.deptId);
 
 const LSCOPE = { student: 'طالب محدد', stage: 'مرحلة كاملة', dept: 'كل طلبة القسم' };
 const MANAGE = {
@@ -408,7 +415,7 @@ const MANAGE = {
     cols: [['المادة', r => esc(r.name)], ['المرحلة', r => STAGE[r.stage] || ''], ['الشعبة', r => esc(r.section || 'الكل')], ['نظري', r => planOf(r, 'theory')], ['عملي', r => planOf(r, 'lab')],
       ['التدريسي (والبديل)', r => esc(teacherName(r.teacherId)) + (r.teacherAltId ? ' <span class="muted">/ بديل: ' + esc(teacherName(r.teacherAltId)) + '</span>' : '')],
       ['مسؤول المختبر (والبديل)', r => r.labId ? esc(teacherName(r.labId)) + (r.labAltId ? ' <span class="muted">/ بديل: ' + esc(teacherName(r.labAltId)) + '</span>' : '') : ''], ['القسم', r => esc(deptName(r.deptId))]],
-    fields: rec => { const d = rec && rec.deptId || (isAdmin() ? '' : me().deptId); return [
+    fields: rec => { const d = rec && rec.deptId || (multiDept() ? '' : me().deptId); return [
       { key: 'name', label: 'اسم المادة', required: true }, { key: 'stage', label: 'المرحلة', type: 'select', options: optStages(), required: true, blank: false }, { key: 'section', label: 'الشعبة (اتركها فارغة لكل الشعب)' },
       { key: 'semester', label: 'الفصل', type: 'select', options: [['الأول', 'الأول'], ['الثاني', 'الثاني']] },
       { key: 'theoryCount', label: 'عدد المحاضرات النظرية', type: 'number', def: 15, required: true },
@@ -452,20 +459,26 @@ const MANAGE = {
       delete out.who;
     }
   },
+  branches: {
+    title: 'فرع', table: 'departments', noDept: true, rowFilter: r => r.parentId === me().deptId,
+    cols: [['الفرع', r => esc(r.name)], ['يتبع', r => esc(deptName(r.parentId))]], fields: () => [{ key: 'name', label: 'اسم الفرع', required: true }],
+    clean: v => { v.parentId = me().deptId; return v; }, perm: 'manageBranches', expHead: ['الفرع'], expRow: r => [r.name], impHelp: ''
+  },
   departments: {
     title: 'قسم', table: 'departments', noDept: true,
-    cols: [['القسم', r => esc(r.name)]], fields: () => [{ key: 'name', label: 'اسم القسم', required: true }],
-    perm: 'admin', expHead: ['القسم'], expRow: r => [r.name], impHelp: 'عمود واحد: <b>اسم القسم</b>.'
+    cols: [['القسم', r => esc(r.name)], ['يتبع (إن كان فرعاً)', r => r.parentId ? esc(deptName(r.parentId)) : '']],
+    fields: rec => [{ key: 'name', label: 'اسم القسم أو الفرع', required: true }, { key: 'parentId', label: 'يتبع القسم (اتركه فارغاً لقسم رئيسي، أو اختر القسم لجعله فرعاً له)', type: 'select', options: live('departments').filter(d => !d.parentId && (!rec || d.id !== rec.id)).sort(byName).map(d => [d.id, d.name]) }],
+    perm: 'admin', expHead: ['القسم', 'يتبع'], expRow: r => [r.name, r.parentId ? deptName(r.parentId) : ''], impHelp: 'عمود واحد: <b>اسم القسم</b>.'
   },
   users: {
     title: 'مستخدم', table: 'users',
-    cols: [['الاسم', r => esc(r.name)], ['اسم المستخدم', r => esc(r.username)], ['الدور', r => ROLE[r.role] || ''], ['التدريسي المرتبط', r => r.teacherId ? esc(teacherName(r.teacherId)) : ''], ['القسم', r => esc(deptName(r.deptId))], ['الحالة', r => r.active === false ? '<span class="badge bad">معطّل</span>' : '<span class="badge ok">فعّال</span>']],
+    cols: [['الاسم', r => esc(r.name)], ['اسم المستخدم', r => esc(r.username)], ['الدور', r => ROLE[r.role] || ''], ['التدريسي المرتبط', r => esc((r.teacherIds && r.teacherIds.length ? r.teacherIds : (r.teacherId ? [r.teacherId] : [])).map(id => teacherName(id) + ' (' + deptName((get('teachers', id) || {}).deptId) + ')').join('، '))], ['القسم', r => esc(deptName(r.deptId))], ['الحالة', r => r.active === false ? '<span class="badge bad">معطّل</span>' : '<span class="badge ok">فعّال</span>']],
     fields: (rec) => [{ key: 'name', label: 'الاسم', required: true }, { key: 'username', label: 'اسم المستخدم (إنجليزي بلا مسافات)', required: true },
       { key: 'password', label: rec ? 'كلمة مرور جديدة (اتركها فارغة لعدم التغيير)' : 'كلمة المرور التي تُسلَّم للمستخدم (6 رموز فأكثر)', type: 'password', required: !rec },
       { key: 'role', label: 'الدور', type: 'select', required: true, blank: false, options: ['teacher', 'rapporteur', 'head', 'admin'].map(r => [r, ROLE[r]]) },
-      { key: 'teacherId', label: 'ربط بسجل التدريسي / مسؤول المختبر (للدور الأخير فقط)', type: 'select', options: personOptsAll(rec && rec.deptId || '') },
+      { key: 'teacherIds', label: 'ربط بسجلات التدريسي / مسؤول المختبر (للدور الأخير فقط). لتدريسي في أكثر من قسم اختر سجله في كل قسم (Ctrl للاختيار المتعدد)', type: 'multi', options: personOptsAll('') },
       { key: 'active', label: 'الحساب فعّال', type: 'checkbox', def: true }, ...deptField()],
-    clean: v => { v.username = v.username.toLowerCase(); if (!v.password) delete v.password; if (v.role !== 'teacher') v.teacherId = ''; if (v.role === 'admin') v.deptId = ''; return v; },
+    clean: v => { v.username = v.username.toLowerCase(); if (!v.password) delete v.password; v.teacherIds = v.role === 'teacher' ? (v.teacherIds || []) : []; v.teacherId = v.teacherIds[0] || ''; if (v.role === 'teacher' && v.teacherId) { const t0 = get('teachers', v.teacherId); if (t0) v.deptId = t0.deptId; } if (v.role === 'admin') v.deptId = ''; return v; },
     lockSelf: true, perm: 'admin', needDept: true,
     expHead: ['الاسم', 'اسم المستخدم', 'كلمة المرور', 'الدور', 'التدريسي المرتبط'], expRow: r => [r.name, r.username, '', ROLE[r.role] || r.role, r.teacherId ? teacherName(r.teacherId) : ''],
     impHelp: 'الأعمدة بالترتيب: <b>الاسم، اسم المستخدم، كلمة المرور (6 رموز فأكثر)، الدور (تدريسي / مسؤول مختبر → «تدريسي / مسؤول مختبر»، رئيس القسم، مقرر القسم، مدير النظام)، اسم التدريسي أو مسؤول المختبر المرتبط</b>.'
@@ -475,14 +488,14 @@ const mview = {};
 function manageScreen(kind) {
   return el => {
     const C = MANAGE[kind]; const V = mview[kind] = mview[kind] || { q: '', stage: '', dept: '', limit: 100 };
-    let rows = live(C.table).filter(r => C.noDept ? true : (myDeptFilter(r) || (kind === 'users' && r.id === me().id)));
-    if (isAdmin() && V.dept && !C.noDept) rows = rows.filter(r => r.deptId === V.dept);
+    let rows = live(C.table).filter(r => C.rowFilter ? C.rowFilter(r) : (C.noDept ? true : (myDeptFilter(r) || (kind === 'users' && r.id === me().id))));
+    if (multiDept() && V.dept && !C.noDept) rows = rows.filter(r => r.deptId === V.dept);
     if (V.stage) rows = rows.filter(r => String(r.stage) === V.stage);
     if (V.q) rows = rows.filter(r => (r.name + ' ' + (r.studentNo || '') + ' ' + (r.username || '')).includes(V.q));
     if (kind === 'leaves') rows.sort((a, b) => b.from.localeCompare(a.from)); else rows.sort(byName);
     el.innerHTML = `<div class="filters"><input type="search" id="mq" placeholder="بحث…" value="${esc(V.q)}">
       ${C.stageFilter ? `<select id="ms"><option value="">كل المراحل</option>${optStages().map(o => `<option value="${o[0]}"${o[0] === V.stage ? ' selected' : ''}>${o[1]}</option>`).join('')}</select>` : ''}
-      ${isAdmin() && !C.noDept ? `<select id="md"><option value="">كل الأقسام</option>${deptOpts().map(o => `<option value="${o[0]}"${o[0] === V.dept ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>` : ''}
+      ${multiDept() && !C.noDept ? `<select id="md"><option value="">كل الأقسام</option>${deptOpts().map(o => `<option value="${o[0]}"${o[0] === V.dept ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>` : ''}
       <button class="btn" id="madd">+ إضافة ${C.title}</button>${can('importData') && C.impHelp ? '<button class="btn ghost" id="mimp">استيراد CSV</button>' : ''}${can('exportData') ? '<button class="btn ghost" id="mexp">تصدير CSV</button>' : ''}</div>
      <div class="card" style="padding:0"><div class="muted" style="padding:8px 12px">العدد: ${rows.length}</div><div class="tblwrap"><table><thead><tr>${C.cols.map(c => `<th>${c[0]}</th>`).join('')}<th></th></tr></thead><tbody>
      ${rows.slice(0, V.limit).map(r => `<tr>${C.cols.map(c => `<td>${c[1](r)}</td>`).join('')}<td><button class="btn ghost sm" data-e="${r.id}">تعديل</button> ${C.lockSelf && r.id === me().id ? '' : `<button class="btn danger sm" data-d="${r.id}">حذف</button>`}</td></tr>`).join('') || `<tr><td colspan="${C.cols.length + 1}" class="empty">لا توجد سجلات</td></tr>`}</tbody></table></div>
@@ -504,14 +517,14 @@ function manageScreen(kind) {
 function editRec(kind, rec, el) {
   const C = MANAGE[kind];
   openForm({
-    title: (rec ? 'تعديل ' : 'إضافة ') + C.title, fields: C.fields(rec), values: rec ? Object.assign({}, rec, kind === 'leaves' ? { who: rec.scope === 'student' ? rec.name : '' } : {}) : { active: true },
+    title: (rec ? 'تعديل ' : 'إضافة ') + C.title, fields: C.fields(rec), values: rec ? Object.assign({}, rec, kind === 'leaves' ? { who: rec.scope === 'student' ? rec.name : '' } : (kind === 'users' ? { teacherIds: rec.teacherIds && rec.teacherIds.length ? rec.teacherIds : (rec.teacherId ? [rec.teacherId] : []) } : {})) : { active: true },
     onSave: async v => {
       if (C.clean) v = C.clean(v);
       const base = rec ? Object.assign({}, rec) : { id: uid(kind[0]), deleted: false };
       const out = Object.assign(base, v);
-      if (!C.noDept && !isAdmin()) out.deptId = me().deptId;
+      if (!C.noDept && !isAdmin() && !myDepts().includes(out.deptId)) out.deptId = me().deptId;
       if (!C.noDept && !out.deptId) throw new Error('اختر القسم');
-      if (kind === 'users' && out.role === 'teacher' && !out.teacherId) throw new Error('اربط المستخدم بسجل التدريسي / مسؤول المختبر');
+      if (kind === 'users' && out.role === 'teacher' && !(out.teacherIds || []).length) throw new Error('اربط المستخدم بسجل التدريسي / مسؤول المختبر');
       if (C.prepare) C.prepare(out, rec);
       if (C.validate) C.validate(out);
       await saveRec(C.table, out); toast('تم الحفظ'); manageScreen(kind)(el);
@@ -620,12 +633,12 @@ const IMPORTERS = {
 function importModal(kind, after) {
   const C = MANAGE[kind];
   showModal('استيراد ' + C.title + ' من ملف CSV', `<p class="muted">${C.impHelp} السطر الأول يمكن أن يكون عناوين. في Excel: حفظ باسم ← CSV UTF-8.</p>
-   ${C.needDept && isAdmin() ? `<label class="f">القسم<select id="idept">${deptOpts().map(o => `<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select></label>` : ''}
+   ${C.needDept && multiDept() ? `<label class="f">القسم / الفرع<select id="idept">${deptOpts().map(o => `<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select></label>` : ''}
    <input type="file" id="ifile" accept=".csv,.txt"><label class="f">أو الصق البيانات هنا<textarea id="itxt" rows="6" dir="auto"></textarea></label>
    <div class="row end"><button class="btn ghost" data-close>إلغاء</button><button class="btn" id="igo">استيراد</button></div>`);
   $('#ifile').onchange = async e => { const f = e.target.files[0]; if (f) $('#itxt').value = await readFileText(f); };
   $('#igo').onclick = async () => {
-    const deptId = isAdmin() ? ($('#idept') ? $('#idept').value : '') : me().deptId;
+    const deptId = multiDept() ? ($('#idept') ? $('#idept').value : '') : me().deptId;
     if (C.needDept && !deptId) return toast('اختر القسم', true);
     const rows = parseCsv($('#itxt').value.replace(/^﻿/, ''));
     if (!rows.length) return toast('لا توجد بيانات للاستيراد', true);
@@ -647,9 +660,9 @@ function settingsScreen(el) {
    <div class="row"><button class="btn" id="sNow">مزامنة الآن</button><button class="btn ghost" id="sFull">إعادة تنزيل كل البيانات</button></div></div>
   ${can('exportData') || isAdmin() ? `<div class="card"><h2>نسخة احتياطية</h2><div class="row">${can('exportData') ? '<button class="btn ghost" id="bkExp">تصدير نسخة احتياطية (JSON)</button>' : ''}${isAdmin() ? '<button class="btn ghost" id="bkImp">استعادة من نسخة احتياطية</button><input type="file" id="bkFile" accept=".json" style="display:none">' : ''}</div>
    <p class="muted">النسخة تشمل كل ما تراه من أقسام وتدريسيين وطلبة ومواد ومحاضرات وغيابات (بدون كلمات المرور).</p></div>` : ''}
-  ${isAdmin() ? `<div class="card"><h2>حدود الإنذار والحرمان</h2><form id="sForm"><div class="row"><label class="f grow">نسبة الإنذار %<input name="warnPct" type="number" min="1" max="100" value="${S.warnPct}"></label><label class="f grow">نسبة الحرمان %<input name="banPct" type="number" min="1" max="100" value="${S.banPct}"></label><label class="f grow">وزن الغياب الجزئي (0.5 = نصف غياب)<input name="pw" type="number" min="0" max="1" step="0.1" value="${S.partialWeight}"></label></div>
+  ${isAdmin() ? `<div class="card"><h2>حدود الإنذار والحرمان</h2><form id="sForm"><div class="row"><label class="f grow">نسبة الإنذار %<input name="warnPct" type="number" min="1" max="100" value="${S.warnPct}"></label><label class="f grow">نسبة الحرمان %<input name="banPct" type="number" min="1" max="100" value="${S.banPct}"></label><label class="f grow">وزن «حضر الساعة الأولى/الأخيرة فقط» (0.5 = نصف غياب)<input name="pw" type="number" min="0" max="1" step="0.1" value="${S.partialWeight}"></label></div>
    <button class="btn">حفظ</button></form><p class="muted">القيم الافتراضية للتجربة؛ عدّلها حسب تعليمات الكلية.</p></div>` : ''}
-  <div class="card"><h2>حول التطبيق</h2><p>${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>نظام متابعة غيابات الطلبة (يعمل بدون إنترنت)<br>تصميم وتطوير: <b>${esc(CFG.AUTHOR || '')}</b><br><span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span><br>${waLink()}<br>الإصدار ${esc(CFG.VERSION || '')}</p></div>`;
+  <div class="card"><h2>حول التطبيق</h2><p>${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>نظام متابعة غيابات الطلبة (يعمل بدون إنترنت)<br>تصميم وتطوير: <b>${esc(CFG.AUTHOR || '')}</b><br><span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span><br>${waLink()}<br>الإصدار ${esc(APP_BUILD)}</p>${CFG.VERSION !== APP_BUILD ? '<p style="color:#dc2626;font-weight:bold">⚠ ملف config.js قديم أو ناقص (رقمه ' + esc(CFG.VERSION || '؟') + '). أعد رفع كل ملفات مجلد app إلى GitHub.</p>' : ''}</div>`;
   $('#sNow').onclick = () => syncNow(true);
   $('#sFull').onclick = async () => { state.since = 0; await metaSet('since', 0); await syncNow(true); toast('تمت إعادة التنزيل'); };
   $('#sRe').onclick = () => { $('#app').innerHTML = ''; renderLogin(); };
@@ -723,7 +736,7 @@ function auditScreen(el) {
 const SCREENS = {
   home: homeScreen, attend: attendScreen, reports: reportsScreen,
   students: manageScreen('students'), teachers: manageScreen('teachers'), subjects: manageScreen('subjects'),
-  users: manageScreen('users'), departments: manageScreen('departments'), settings: settingsScreen, permissions: permsScreen, audit: auditScreen, leaves: manageScreen('leaves')
+  users: manageScreen('users'), departments: manageScreen('departments'), settings: settingsScreen, permissions: permsScreen, audit: auditScreen, leaves: manageScreen('leaves'), branches: manageScreen('branches')
 };
 
 /* ---------- الإقلاع ---------- */

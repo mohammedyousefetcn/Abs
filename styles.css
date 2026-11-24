@@ -113,3 +113,7 @@ td.wrap{white-space:normal}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{border:1px solid var(--bd);background:#fff;border-radius:99px;padding:6px 12px;font:inherit;font-size:.85rem;cursor:pointer}
 .chip.on{background:var(--p);color:#fff;border-color:transparent}
+
+.logrow{padding:10px 12px;border-bottom:1px solid var(--bd);font-size:.9rem}
+.lg-h{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:2px}
+.foot a,.card a{color:var(--p)}
