@@ -4,6 +4,7 @@ const TYPE = { theory: 'نظري', lab: 'عملي' };
 const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', late: 'متأخر', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
+const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', late: 'متأخر', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', late: 'warn', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
 const CFG = window.APP_CONFIG || {};
@@ -228,41 +229,33 @@ function attendScreen(el) {
     <input type="date" id="aDate" value="${att.date}">
     ${!s.section && sections.length > 1 ? `<select id="aSec"><option value="">كل الشعب</option>${sections.map(x => `<option${x === att.section ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
    </div>
-   <p class="muted" style="margin:8px 0 0">${att.existing ? (locked ? '🔒 هذه المحاضرة مسجّلة ولا تملك صلاحية تعديلها.' : '⚠ هذه المحاضرة مسجّلة سابقاً — يمكنك تعديلها.') : 'اضغط على اسم الطالب لتبديله بين حاضر وغائب، واضغط على الحالة الملوّنة لاختيار: مجاز / متأخر / حضر الساعة الأولى فقط / حضر الساعة الأخيرة فقط.'}</p></div>
+   <p class="muted" style="margin:8px 0 0">${att.existing ? (locked ? '🔒 هذه المحاضرة مسجّلة ولا تملك صلاحية تعديلها.' : '⚠ هذه المحاضرة مسجّلة سابقاً — يمكنك تعديلها.') : 'اضغط على النقطة أمام اسم الطالب لتحديد حالته (الأصل: حاضر). «أول ساعة» = حضر الساعة الأولى فقط، «آخر ساعة» = حضر الساعة الأخيرة فقط.'}</p></div>
+  ${recd.size ? `<div class="card"><h3 style="margin:0 0 8px">المحاضرات المسجّلة</h3><div class="chips">${[...recd.entries()].sort((x, y) => x[0] - y[0]).map(([n, x]) => `<button class="chip${n === att.no ? ' on' : ''}" data-lec="${n}">${n === att.no ? '' : (can('editAttendance') ? '✏ ' : '👁 ')}محاضرة ${n} · ${esc(x.date || '')}</button>`).join('')}</div><p class="muted" style="margin:6px 0 0">${can('editAttendance') ? 'اضغط على محاضرة لفتحها وتعديل حضورها أو حذفها.' : 'اضغط لعرض الحضور فقط — لا تملك صلاحية التعديل.'}</p></div>` : ''}
   <div class="card" style="padding:0">
    <div class="filters" style="padding:10px;margin:0"><input type="search" id="aQ" placeholder="بحث عن طالب…" value="${esc(att.q)}"><button class="btn ghost sm" id="aAll">الكل حاضر</button></div>
-   <div id="aList">${list.length ? list.filter(x => !q || x.name.includes(q)).map((x, i) => `<div class="stu ${att.states[x.id] || ''}" data-id="${x.id}"><span class="n">${i + 1}</span><span class="nm">${esc(x.name)}${x.section ? ' <span class="muted">(' + esc(x.section) + ')</span>' : ''}</span><span class="badge ${BADGE[att.states[x.id]] || 'ok'}" data-pick="${x.id}">${STATUS[att.states[x.id] || 'present']} ▾</span></div>`).join('') : '<div class="empty">لا يوجد طلبة مطابقون لهذه المادة/المرحلة/الشعبة.</div>'}</div>
+   ${list.length ? `<div class="bhead"><span class="n"></span><span class="nm"></span>${Object.keys(STATUS).map(k => `<span class="bc">${BSHORT[k]}</span>`).join('')}</div>` : ''}
+   <div id="aList">${list.length ? list.filter(x => !q || x.name.includes(q)).map((x, i) => { const cur = att.states[x.id] || 'present'; return `<div class="stu ${att.states[x.id] || ''}" data-id="${x.id}"><span class="n">${i + 1}</span><span class="nm">${esc(x.name)}${x.section ? ' <span class="muted">(' + esc(x.section) + ')</span>' : ''}</span>${Object.keys(STATUS).map(k => `<span class="bc"><span class="bub b-${k}${k === cur ? ' on' : ''}" data-s="${k}" role="radio" aria-checked="${k === cur}" aria-label="${STATUS[k]}"></span></span>`).join('')}</div>`; }).join('') : '<div class="empty">لا يوجد طلبة مطابقون لهذه المادة/المرحلة/الشعبة.</div>'}</div>
    <div class="sticky-save"><span>غائب <b>${cnt.absent}</b> · جزئي <b>${cnt.part}</b> · مجاز <b>${cnt.excused}</b> · متأخر <b>${cnt.late}</b> · من ${list.length}</span><span class="grow"></span>
     ${can('exportData') ? '<button class="btn ghost sm" id="aExp">تصدير الكشف</button>' : ''}${att.existing && !locked ? '<button class="btn danger sm" id="aDel">حذف المحاضرة</button>' : ''}${locked ? '' : `<button class="btn" id="aSave">${att.existing ? 'حفظ التعديل' : 'حفظ المحاضرة'}</button>`}</div></div>`;
   const rerender = () => attendScreen(el);
   $('#aSub').onchange = e => { const [id, ty] = e.target.value.split('|'); attInit(id, ty); rerender(); };
   $('#aNo').onchange = e => { att.no = Number(e.target.value) || 1; att.date = today(); attLoad(); rerender(); };
+  el.querySelectorAll('[data-lec]').forEach(c => c.onclick = () => { att.no = Number(c.dataset.lec); att.date = today(); attLoad(); rerender(); window.scrollTo(0, 0); });
   $('#aDate').onchange = e => { att.date = e.target.value || today(); };
   if ($('#aSec')) $('#aSec').onchange = e => { att.section = e.target.value; att.date = today(); attLoad(); rerender(); };
   $('#aQ').oninput = e => { att.q = e.target.value; const p = e.target.selectionStart; rerender(); const n = $('#aQ'); n.focus(); n.setSelectionRange(p, p); };
   $('#aAll').onclick = () => { att.states = {}; rerender(); };
   $('#aList').onclick = e => {
     if (locked) return;
-    const r = e.target.closest('.stu'); if (!r) return;
-    const id = r.dataset.id;
-    if (e.target.closest('[data-pick]')) return pickStatus(id, rerender);
-    if (att.states[id]) delete att.states[id]; else att.states[id] = 'absent';
+    const bub = e.target.closest('[data-s]'); if (!bub) return;
+    const id = bub.closest('.stu').dataset.id, k = bub.dataset.s;
+    if (k === 'present') delete att.states[id]; else att.states[id] = k;
     const sc = window.scrollY; rerender(); window.scrollTo(0, sc);
   };
   if ($('#aSave')) $('#aSave').onclick = () => attSave(s, list);
   if ($('#aExp')) $('#aExp').onclick = () => downloadCsv('كشف-' + s.name + '-' + TYPE[att.type] + '-محاضرة' + att.no + '.csv',
     [['ت', 'الطالب', 'الشعبة', 'الحالة']].concat(list.map((x, i) => [i + 1, x.name, x.section || '', STATUS[att.states[x.id] || 'present']])));
   if ($('#aDel')) $('#aDel').onclick = () => attDelete(s);
-}
-function pickStatus(id, rerender) {
-  const st = get('students', id); const cur = att.states[id] || 'present';
-  showModal('حالة الطالب: ' + st.name, Object.keys(STATUS).map(k => `<button class="opt${k === cur ? ' on' : ''}" data-st="${k}">${STATUS[k]}</button>`).join('') + '<div class="row end"><button class="btn ghost" data-close>إلغاء</button></div>');
-  $('#modalRoot').addEventListener('click', function h(e) {
-    const b = e.target.closest('[data-st]'); if (!b) return;
-    $('#modalRoot').removeEventListener('click', h);
-    if (b.dataset.st === 'present') delete att.states[id]; else att.states[id] = b.dataset.st;
-    closeModal(); const sc = window.scrollY; rerender(); window.scrollTo(0, sc);
-  });
 }
 async function attSave(s, list) {
   const id = sessKey(s.id, att.type, att.no, att.section);

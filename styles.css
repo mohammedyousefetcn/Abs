@@ -98,3 +98,18 @@ td.wrap{white-space:normal}
 .opt.on{border:2px solid var(--p);font-weight:700}
 .ptable td,.ptable th{text-align:center}.ptable td:first-child,.ptable th:first-child{text-align:right}
 .ptable input{width:22px;height:22px}
+
+/* ورقة الاختيار (Bubble sheet) */
+.stu{cursor:default;gap:4px;padding:8px 10px}
+.bhead{display:flex;align-items:center;gap:4px;padding:6px 10px;background:#f1f5f9;border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:2;font-size:.68rem;color:var(--mu);text-align:center}
+.bhead .n{width:28px}.bhead .nm{flex:1}
+.bc{width:44px;flex:none;display:flex;justify-content:center;align-items:center;text-align:center;line-height:1.1}
+.bub{width:28px;height:28px;border-radius:50%;border:2px solid #94a3b8;background:#fff;cursor:pointer;display:block;box-sizing:border-box}
+.bub:active{transform:scale(.9)}
+.bub.on{border-width:0}
+.bub.b-present.on{background:var(--ok)}.bub.b-absent.on{background:var(--bad)}.bub.b-excused.on{background:var(--exc)}.bub.b-late.on{background:var(--late)}.bub.b-pfirst.on,.bub.b-plast.on{background:#7c3aed}
+@media(max-width:480px){.bc{width:36px}.bub{width:25px;height:25px}.bhead{font-size:.6rem}.stu .nm{font-size:.9rem}}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--bd);background:#fff;border-radius:99px;padding:6px 12px;font:inherit;font-size:.85rem;cursor:pointer}
+.chip.on{background:var(--p);color:#fff;border-color:transparent}
