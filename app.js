@@ -1,10 +1,11 @@
 'use strict';
-const ROLE = { admin: 'مدير النظام', head: 'رئيس القسم', rapporteur: 'مقرر القسم', teacher: 'تدريسي / مسؤول مختبر' };
+const ROLE = { admin: 'مدير النظام', head: 'رئيس القسم', rapporteur: 'مقرر القسم', teacher: 'تدريسي / مسؤول مختبر / فني' };
 const TYPE = { theory: 'نظري', lab: 'عملي' };
-const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر' };
+const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني' };
+const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '1.4';
+const APP_BUILD = '1.5';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
@@ -68,19 +69,22 @@ function fieldHtml(f, v) {
   if (f.type === 'select')
     return `<label class="f">${f.label}<select name="${f.key}"${req}>${f.blank !== false ? '<option value="">—</option>' : ''}${f.options.map(o => `<option value="${esc(o[0])}"${String(o[0]) === String(val) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`;
   if (f.type === 'multi') { const sel = Array.isArray(v) ? v : []; return `<label class="f">${f.label}<select name="${f.key}" multiple size="6">${f.options.map(o => `<option value="${esc(o[0])}"${sel.includes(o[0]) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select></label>`; }
+  if (f.type === 'checks') { const sel = Array.isArray(v) ? v : []; return `<div class="f"><span>${f.label}</span><div class="checks">${f.options.map(o => `<label class="chk"><input type="checkbox" data-ck="${f.key}" value="${esc(o[0])}"${sel.includes(o[0]) ? ' checked' : ''}> ${esc(o[1])}</label>`).join('')}</div></div>`; }
   if (f.type === 'checkbox')
     return `<label class="f chk"><input type="checkbox" name="${f.key}"${val ? ' checked' : ''}> ${f.label}</label>`;
   if (f.type === 'textarea')
     return `<label class="f">${f.label}<textarea name="${f.key}" rows="3">${esc(val)}</textarea></label>`;
   return `<label class="f">${f.label}<input name="${f.key}" type="${f.type || 'text'}" value="${esc(val)}"${req}${f.type === 'password' ? ' autocomplete="new-password" minlength="6"' : ''}${f.type === 'number' ? ' min="0"' : ''}></label>`;
 }
-function openForm({ title, fields, values, onSave }) {
+function openForm({ title, fields, values, onSave, onOpen }) {
   showModal(title, `<form id="mform">${fields.map(f => fieldHtml(f, (values || {})[f.key])).join('')}
    <div class="row end"><button type="button" class="btn ghost" data-close>إلغاء</button><button class="btn">حفظ</button></div></form>`);
+  if (onOpen) onOpen();
   $('#mform').onsubmit = async e => {
     e.preventDefault();
     const v = {};
     fields.forEach(f => {
+      if (f.type === 'checks') { v[f.key] = [...document.querySelectorAll('#mform [data-ck="' + f.key + '"]:checked')].map(c => c.value); return; }
       const el = $('#mform [name="' + f.key + '"]');
       v[f.key] = f.type === 'multi' ? [...el.selectedOptions].map(o => o.value) : f.type === 'checkbox' ? el.checked : (f.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : el.value.trim());
     });
@@ -94,12 +98,12 @@ function navItems() {
   if (can('recordAttendance')) n.push(['attend', 'تسجيل الغياب']);
   if (can('viewReports')) n.push(['reports', 'التقارير ولوحة المتابعة']);
   if (can('manageStudents')) n.push(['students', 'الطلبة']);
-  if (can('manageTeachers')) n.push(['teachers', 'التدريسيون ومسؤولو المختبرات']);
+  if (can('manageTeachers') || isAdmin()) n.push(['staff', 'الكادر والحسابات']);
   if (can('manageSubjects')) n.push(['subjects', 'المواد الدراسية']);
   if (can('manageLeaves')) n.push(['leaves', 'الإجازات']);
   if (!isAdmin() && can('manageBranches') && !(get('departments', me().deptId) || {}).parentId) n.push(['branches', 'فروع القسم']);
   if (can('viewAudit')) n.push(['audit', 'سجل التعديلات']);
-  if (isAdmin()) n.push(['users', 'المستخدمون وكلمات المرور'], ['departments', 'الأقسام'], ['permissions', 'تحديد الصلاحيات']);
+  if (isAdmin()) n.push(['departments', 'الأقسام'], ['permissions', 'تحديد الصلاحيات']);
   n.push(['settings', 'الإعدادات والحساب']);
   return n;
 }
@@ -387,12 +391,13 @@ function downloadCsv(name, rows) {
 
 /* ---------- شاشات الإدارة العامة ---------- */
 const deptOpts = () => live('departments').filter(d => isAdmin() || myDepts().includes(d.id)).sort(byName).map(d => [d.id, d.name]);
-const personOpts = (kind, deptId) => live('teachers').filter(t => (!deptId || t.deptId === deptId) && (!kind || (t.kind || 'teacher') === kind)).sort(byName).map(t => [t.id, deptId ? t.name : t.name + ' — ' + deptName(t.deptId)]);
+const personOpts = (kind, deptId) => live('teachers').filter(t => (!deptId || t.deptId === deptId) && (!kind || (kind === 'lab' ? ['lab', 'tech'].includes(t.kind) : (t.kind || 'teacher') === kind))).sort(byName).map(t => [t.id, deptId ? t.name : t.name + ' — ' + deptName(t.deptId)]);
 const personOptsAll = deptId => live('teachers').filter(t => !deptId || t.deptId === deptId).sort(byName).map(t => [t.id, t.name + ' (' + KIND[t.kind || 'teacher'] + ') — ' + deptName(t.deptId)]);
 const multiDept = () => isAdmin() || myDepts().length > 1;
 const deptField = () => multiDept() ? [{ key: 'deptId', label: 'القسم / الفرع', type: 'select', options: deptOpts(), required: true, blank: false, def: isAdmin() ? '' : me().deptId }] : [];
 const myDeptFilter = r => isAdmin() || myDepts().includes(r.deptId);
 
+const STAFF_IMP = { title: 'الكادر', impHelp: 'الأعمدة بالترتيب: <b>الاسم، النوع (تدريسي / مسؤول مختبر / فني / رئيس قسم / مقرر قسم)، الهاتف، الأقسام (يفصل بينها فاصلة عربية «،»)، اسم المستخدم، كلمة المرور</b> (الحسابات يضيفها مدير النظام فقط).', needDept: false };
 const LSCOPE = { student: 'طالب محدد', stage: 'مرحلة كاملة', dept: 'كل طلبة القسم' };
 const MANAGE = {
   students: {
@@ -582,6 +587,21 @@ const IMPORTERS = {
     if (recs.length) await saveRecs('students', recs);
     return { count: recs.length, skipped };
   },
+  staff: async (rows, deptId) => {
+    if (rows.length && /الاسم|name/i.test(rows[0][0])) rows = rows.slice(1);
+    const kindOf = t => { t = String(t || ''); if (/مدير/.test(t)) return 'admin'; if (/رئيس/.test(t)) return 'head'; if (/مقرر/.test(t)) return 'rapporteur'; if (/فني/.test(t)) return 'tech'; if (/مختبر|lab/i.test(t)) return 'lab'; return 'teacher'; };
+    let count = 0, skipped = 0;
+    for (const r of rows) {
+      const name = (r[0] || '').trim(); if (!name) { skipped++; continue; }
+      const names = String(r[3] || '').split(/[،,;؛]/).map(x => x.trim()).filter(Boolean);
+      const dl = deptOpts(); const depts = names.map(n => (dl.find(o => o[1] === n) || [])[0]).filter(Boolean);
+      const dd = depts.length ? depts : (deptId ? [deptId] : []);
+      const kind = kindOf(r[1]);
+      if (live('teachers').some(t => t.name === name && dd.some(d => d === t.deptId))) { skipped++; continue; }
+      try { await saveStaff({ name, kind, phone: r[2], depts: dd, teaches: false, username: isAdmin() ? r[4] : '', password: isAdmin() ? r[5] : '', active: true }, null); count++; } catch (e) { skipped++; }
+    }
+    return { count, skipped };
+  },
   teachers: async (rows, deptId) => {
     if (rows.length && /الاسم|name/i.test(rows[0][0])) rows = rows.slice(1);
     const exist = new Set(live('teachers').filter(t => t.deptId === deptId).map(t => t.name));
@@ -631,7 +651,7 @@ const IMPORTERS = {
   }
 };
 function importModal(kind, after) {
-  const C = MANAGE[kind];
+  const C = kind === 'staff' ? STAFF_IMP : MANAGE[kind];
   showModal('استيراد ' + C.title + ' من ملف CSV', `<p class="muted">${C.impHelp} السطر الأول يمكن أن يكون عناوين. في Excel: حفظ باسم ← CSV UTF-8.</p>
    ${C.needDept && multiDept() ? `<label class="f">القسم / الفرع<select id="idept">${deptOpts().map(o => `<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select></label>` : ''}
    <input type="file" id="ifile" accept=".csv,.txt"><label class="f">أو الصق البيانات هنا<textarea id="itxt" rows="6" dir="auto"></textarea></label>
@@ -733,10 +753,113 @@ function auditScreen(el) {
   if ($('#afX')) $('#afX').onclick = () => downloadCsv('سجل-التعديلات-' + today() + '.csv', [['الوقت', 'المستخدم', 'الدور', 'العملية', 'المادة', 'النوع', 'المحاضرة', 'التفاصيل']].concat(rows.map(r => [fmt(r.at), r.userName, ROLE[r.role] || '', AUDIT_ACT[r.action] || r.action, r.subjectName || '', r.sessionId ? TYPE[r.type || 'theory'] : '', r.lectureNo || '', (r.detail || '').replace(/\n/g, ' ; ')])));
 }
 
+/* ---------- الكادر والحسابات (شاشة موحّدة) ---------- */
+const usedInSubjects = id => live('subjects').some(x => [x.teacherId, x.teacherAltId, x.labId, x.labAltId].includes(id));
+const userTeacherIds = u => [...(u.teacherIds || []), u.teacherId].filter(Boolean);
+function staffRows() {
+  const groups = new Map();
+  live('teachers').filter(myDeptFilter).forEach(t => { const k = t.personId || t.id; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); });
+  const users = isAdmin() ? live('users') : [];
+  const rows = []; const linked = new Set();
+  groups.forEach((recs, key) => {
+    const ids = recs.map(r => r.id);
+    const user = users.find(u => userTeacherIds(u).some(x => ids.includes(x)));
+    if (user) linked.add(user.id);
+    const f = recs[0];
+    rows.push({ key, name: f.name, kind: user && ['head', 'rapporteur'].includes(user.role) ? user.role : (f.kind || 'teacher'), phone: f.phone || '', depts: [...new Set(recs.map(r => r.deptId))], recs, user });
+  });
+  users.filter(u => !linked.has(u.id)).forEach(u => rows.push({ key: 'u:' + u.id, name: u.name, kind: u.role === 'teacher' ? 'teacher' : u.role, phone: '', depts: u.deptId ? [u.deptId] : [], recs: [], user: u }));
+  return rows;
+}
+async function saveStaff(v, row) {
+  const admin = isAdmin(), kind = v.kind, name = (v.name || '').trim(), phone = (v.phone || '').trim();
+  const isHead = kind === 'head' || kind === 'rapporteur', isAdm = kind === 'admin';
+  const depts = isAdm ? [] : (v.depts || []);
+  if (!name) throw new Error('اكتب الاسم');
+  if (!admin && !['teacher', 'lab', 'tech'].includes(kind)) throw new Error('هذا النوع يضيفه مدير النظام فقط');
+  if (!isAdm && !depts.length) throw new Error('اختر قسماً واحداً على الأقل');
+  if (isHead && depts.length !== 1) throw new Error('رئيس القسم والمقرر يتبعان قسماً واحداً');
+  if (!admin && depts.some(d => !myDepts().includes(d))) throw new Error('قسم غير مسموح');
+  const personId = row && !String(row.key).startsWith('u:') ? row.key : uid('p');
+  const needsRecs = !isAdm && (!isHead || !!v.teaches);
+  const existing = row ? row.recs : [];
+  const recsOut = needsRecs ? depts.map(d => Object.assign({}, existing.find(r => r.deptId === d) || { id: uid('t') }, { name, kind: isHead ? 'teacher' : kind, phone, deptId: d, personId, deleted: false })) : [];
+  const dropped = existing.filter(r => !recsOut.some(o => o.id === r.id));
+  dropped.forEach(r => { if (usedInSubjects(r.id)) throw new Error('لا يمكن إزالة ' + deptName(r.deptId) + ' لأن له مواد مخصّصة، أزل تخصيصها من صفحة المواد أولاً'); });
+  let user = null;
+  if (admin) {
+    const uname = (v.username || '').trim().toLowerCase();
+    if (uname || (row && row.user)) {
+      if (!uname) throw new Error('اسم المستخدم مطلوب لهذا الحساب');
+      if (!/^\S{3,40}$/.test(uname)) throw new Error('اسم المستخدم 3 رموز فأكثر بلا مسافات');
+      if (!(row && row.user) && !v.password) throw new Error('اكتب كلمة المرور للحساب الجديد');
+      if (v.password && String(v.password).length < 6) throw new Error('كلمة المرور 6 رموز فأكثر');
+      const me0 = row && row.user;
+      if (live('users').some(u => u.username === uname && (!me0 || u.id !== me0.id))) throw new Error('اسم المستخدم مستخدم مسبقاً');
+      const role = isAdm ? 'admin' : (isHead ? kind : 'teacher');
+      if (me0 && me0.id === me().id && (role !== 'admin' || v.active === false)) throw new Error('لا يمكنك تغيير دور حسابك أو تعطيله');
+      const keepDept = me0 && depts.includes(me0.deptId) ? me0.deptId : depts[0];
+      user = Object.assign({}, me0 || { id: uid('u'), deleted: false }, { name, username: uname, role, active: v.active !== false, deptId: isAdm ? '' : keepDept, teacherIds: recsOut.map(r => r.id), teacherId: recsOut.length ? recsOut[0].id : '' });
+      if (v.password) user.password = v.password; else delete user.password;
+    }
+  }
+  if (recsOut.length) await saveRecs('teachers', recsOut);
+  if (dropped.length) await saveRecs('teachers', dropped.map(r => Object.assign({}, r, { deleted: true })));
+  if (user) await saveRecs('users', [user]);
+}
+const sview = { q: '', kind: '', dept: '', limit: 100 };
+function staffScreen(el) {
+  const admin = isAdmin();
+  let rows = staffRows();
+  if (sview.kind) rows = rows.filter(r => r.kind === sview.kind);
+  if (multiDept() && sview.dept) rows = rows.filter(r => r.depts.includes(sview.dept));
+  if (sview.q) rows = rows.filter(r => (r.name + ' ' + (r.user ? r.user.username : '') + ' ' + r.phone).includes(sview.q));
+  rows.sort(byName);
+  const kinds = admin ? Object.entries(SKIND) : [['teacher', SKIND.teacher], ['lab', SKIND.lab], ['tech', SKIND.tech]];
+  el.innerHTML = `<div class="filters"><input type="search" id="sq" placeholder="بحث بالاسم أو اسم المستخدم أو الهاتف…" value="${esc(sview.q)}">
+   <select id="sk"><option value="">كل الأنواع</option>${kinds.map(([k, l]) => `<option value="${k}"${k === sview.kind ? ' selected' : ''}>${l}</option>`).join('')}</select>
+   ${multiDept() ? `<select id="sd"><option value="">كل الأقسام</option>${deptOpts().map(o => `<option value="${o[0]}"${o[0] === sview.dept ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>` : ''}
+   <button class="btn" id="sadd">+ إضافة</button>${can('importData') ? '<button class="btn ghost" id="simp">استيراد CSV</button>' : ''}${can('exportData') ? '<button class="btn ghost" id="sexp">تصدير CSV</button>' : ''}</div>
+   ${admin ? '' : '<p class="muted">إنشاء حسابات الدخول وكلمات المرور من صلاحية مدير النظام.</p>'}
+   <div class="card" style="padding:0"><div class="muted" style="padding:8px 12px">العدد: ${rows.length}</div><div class="tblwrap"><table><thead><tr><th>الاسم</th><th>النوع</th><th>الهاتف</th><th>الأقسام</th>${admin ? '<th>اسم المستخدم</th><th>الحساب</th>' : ''}<th></th></tr></thead><tbody>
+   ${rows.slice(0, sview.limit).map(r => `<tr><td>${esc(r.name)}</td><td>${SKIND[r.kind] || ''}</td><td dir="ltr" style="text-align:right">${esc(r.phone)}</td><td>${esc(r.depts.map(deptName).join('، '))}</td>${admin ? `<td dir="ltr" style="text-align:right">${r.user ? esc(r.user.username) : '<span class="muted">—</span>'}</td><td>${r.user ? (r.user.active === false ? '<span class="badge bad">معطّل</span>' : '<span class="badge ok">فعّال</span>') : '<span class="muted">بلا حساب</span>'}</td>` : ''}
+   <td><button class="btn ghost sm" data-e="${esc(r.key)}">تعديل</button> ${r.user && r.user.id === me().id ? '' : `<button class="btn danger sm" data-d="${esc(r.key)}">حذف</button>`}</td></tr>`).join('') || `<tr><td colspan="7" class="empty">لا يوجد</td></tr>`}</tbody></table></div>
+   ${rows.length > sview.limit ? '<div class="row end" style="padding:10px"><button class="btn ghost" id="smore">عرض المزيد</button></div>' : ''}</div>`;
+  const all = staffRows(); const byKey = k => all.find(r => String(r.key) === k);
+  $('#sq').oninput = e => { sview.q = e.target.value; const p = e.target.selectionStart; staffScreen(el); const n = $('#sq'); n.focus(); n.setSelectionRange(p, p); };
+  $('#sk').onchange = e => { sview.kind = e.target.value; staffScreen(el); };
+  if ($('#sd')) $('#sd').onchange = e => { sview.dept = e.target.value; staffScreen(el); };
+  if ($('#smore')) $('#smore').onclick = () => { sview.limit += 200; staffScreen(el); };
+  $('#sadd').onclick = () => staffForm(null, el);
+  if ($('#simp')) $('#simp').onclick = () => importModal('staff', () => staffScreen(el));
+  if ($('#sexp')) $('#sexp').onclick = () => downloadCsv('الكادر-' + today() + '.csv', [['الاسم', 'النوع', 'الهاتف', 'الأقسام'].concat(admin ? ['اسم المستخدم'] : [])].concat(rows.map(r => [r.name, SKIND[r.kind] || '', r.phone, r.depts.map(deptName).join('، ')].concat(admin ? [r.user ? r.user.username : ''] : []))));
+  el.querySelectorAll('[data-e]').forEach(b => b.onclick = () => staffForm(byKey(b.dataset.e), el));
+  el.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => {
+    const r = byKey(b.dataset.d); if (!r) return;
+    if (r.recs.some(x => usedInSubjects(x.id))) return toast('لا يمكن الحذف: له مواد مخصّصة، أزل تخصيصها من صفحة المواد أولاً', true);
+    if (!confirm('حذف «' + r.name + '»' + (admin && r.user ? ' وحسابه' : '') + '؟')) return;
+    if (r.recs.length) await saveRecs('teachers', r.recs.map(x => Object.assign({}, x, { deleted: true })));
+    if (admin && r.user) await saveRecs('users', [Object.assign({}, r.user, { deleted: true })]);
+    toast('تم الحذف'); staffScreen(el);
+  });
+}
+function staffForm(row, el) {
+  const admin = isAdmin();
+  const kinds = admin ? Object.entries(SKIND) : [['teacher', SKIND.teacher], ['lab', SKIND.lab], ['tech', SKIND.tech]];
+  const fields = [{ key: 'name', label: 'الاسم', required: true }, { key: 'kind', label: 'النوع', type: 'select', blank: false, required: true, options: kinds, def: 'teacher' }, { key: 'phone', label: 'الهاتف' },
+    { key: 'depts', label: 'القسم / الأقسام (للتدريسي والمسؤول والفني يمكن اختيار أكثر من قسم، ولكل قسم سجل مستقل. ورئيس القسم والمقرر قسم واحد)', type: 'checks', options: deptOpts() },
+    { key: 'teaches', label: 'يُدرّس مواد أيضاً (لرئيس القسم أو المقرر)', type: 'checkbox' }];
+  if (admin) fields.push({ key: 'username', label: 'اسم المستخدم للدخول (إنجليزي بلا مسافات) — اتركه فارغاً لشخص بلا حساب' }, { key: 'password', label: row && row.user ? 'كلمة مرور جديدة (اتركها فارغة لعدم التغيير)' : 'كلمة المرور التي تُسلَّم له (6 رموز فأكثر)', type: 'password' }, { key: 'active', label: 'الحساب فعّال', type: 'checkbox', def: true });
+  const values = row ? { name: row.name, kind: row.kind, phone: row.phone, depts: row.depts, teaches: ['head', 'rapporteur'].includes(row.kind) && row.recs.length > 0, username: row.user ? row.user.username : '', active: row.user ? row.user.active !== false : true } : { kind: 'teacher', depts: admin ? [] : [me().deptId], active: true };
+  openForm({ title: row ? 'تعديل ' + row.name : 'إضافة', fields, values,
+    onOpen: () => { const k = $('#mform [name=kind]'), t = $('#mform [name=teaches]'); const upd = () => { t.closest('label').style.display = ['head', 'rapporteur'].includes(k.value) ? '' : 'none'; }; k.onchange = upd; upd(); },
+    onSave: async v => { await saveStaff(v, row); toast('تم الحفظ'); staffScreen(el); } });
+}
+
 const SCREENS = {
   home: homeScreen, attend: attendScreen, reports: reportsScreen,
-  students: manageScreen('students'), teachers: manageScreen('teachers'), subjects: manageScreen('subjects'),
-  users: manageScreen('users'), departments: manageScreen('departments'), settings: settingsScreen, permissions: permsScreen, audit: auditScreen, leaves: manageScreen('leaves'), branches: manageScreen('branches')
+  students: manageScreen('students'), subjects: manageScreen('subjects'),
+  staff: staffScreen, departments: manageScreen('departments'), settings: settingsScreen, permissions: permsScreen, audit: auditScreen, leaves: manageScreen('leaves'), branches: manageScreen('branches')
 };
 
 /* ---------- الإقلاع ---------- */

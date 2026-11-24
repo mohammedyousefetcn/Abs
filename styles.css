@@ -117,3 +117,6 @@ td.wrap{white-space:normal}
 .logrow{padding:10px 12px;border-bottom:1px solid var(--bd);font-size:.9rem}
 .lg-h{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:2px}
 .foot a,.card a{color:var(--p)}
+
+.checks{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px;border:1px solid var(--bd);border-radius:8px;background:#fff}
+.checks .chk{display:flex;align-items:center;gap:6px;margin:0}
