@@ -1,6 +1,6 @@
 'use strict';
 /* النواة: التخزين المحلي (IndexedDB) + قائمة الانتظار + المزامنة مع Apps Script */
-const TABLES = ['departments', 'teachers', 'subjects', 'students', 'sessions', 'absences', 'users', 'settings'];
+const TABLES = ['departments', 'teachers', 'subjects', 'students', 'sessions', 'absences', 'users', 'settings', 'audit'];
 const state = { apiUrl: '', token: '', user: null, since: 0, offset: 0, pending: 0, status: 'idle', lastSync: 0, error: '' };
 const DB = {};
 TABLES.forEach(t => DB[t] = new Map());
@@ -17,12 +17,12 @@ function uid(p) {
 
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('absence-app', 1);
+    const r = indexedDB.open('absence-app', 2);
     r.onupgradeneeded = () => {
       const db = r.result;
-      TABLES.forEach(t => db.createObjectStore(t, { keyPath: 'id' }));
-      db.createObjectStore('outbox', { keyPath: 'k' });
-      db.createObjectStore('meta', { keyPath: 'k' });
+      TABLES.forEach(t => { if (!db.objectStoreNames.contains(t)) db.createObjectStore(t, { keyPath: 'id' }); });
+      if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath: 'k' });
+      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'k' });
     };
     r.onsuccess = () => { idb = r.result; res(); };
     r.onerror = () => rej(r.error);

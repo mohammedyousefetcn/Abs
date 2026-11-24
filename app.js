@@ -9,11 +9,11 @@ const BADGE = { absent: 'bad', excused: 'exc', late: 'warn', pfirst: 'part', pla
 const isPartial = st => st === 'pfirst' || st === 'plast';
 const CFG = window.APP_CONFIG || {};
 const ACTIONS = [['manageStudents', 'إدارة الطلبة (إضافة / تعديل / حذف)'], ['manageTeachers', 'إدارة التدريسيين ومسؤولي المختبرات'], ['manageSubjects', 'إدارة المواد وتخصيصها'],
-  ['recordAttendance', 'تسجيل الغياب'], ['editAttendance', 'تعديل وحذف محاضرة مسجّلة سابقاً'], ['viewReports', 'عرض التقارير ولوحة المتابعة'], ['exportData', 'تصدير البيانات'], ['importData', 'استيراد البيانات']];
+  ['recordAttendance', 'تسجيل الغياب'], ['editAttendance', 'تعديل حضور محاضرة مسجّلة سابقاً'], ['deleteAttendance', 'حذف محاضرة مسجّلة'], ['viewAudit', 'عرض سجل التعديلات'], ['manageLeaves', 'إدخال الإجازات (لطالب أو مرحلة أو قسم لفترة من تاريخ إلى تاريخ)'], ['viewReports', 'عرض التقارير ولوحة المتابعة'], ['exportData', 'تصدير البيانات'], ['importData', 'استيراد البيانات']];
 const ALL_ON = Object.fromEntries(ACTIONS.map(a => [a[0], true]));
 const DEFAULT_PERMS = {
   head: ALL_ON,
-  rapporteur: ALL_ON,
+  rapporteur: Object.assign({}, ALL_ON, { viewAudit: false }),
   teacher: { recordAttendance: true, editAttendance: true, viewReports: true, exportData: true }
 };
 const PERM_ROLES = ['head', 'rapporteur', 'teacher'];
@@ -91,11 +91,14 @@ function navItems() {
   if (can('manageStudents')) n.push(['students', 'الطلبة']);
   if (can('manageTeachers')) n.push(['teachers', 'التدريسيون ومسؤولو المختبرات']);
   if (can('manageSubjects')) n.push(['subjects', 'المواد الدراسية']);
+  if (can('manageLeaves')) n.push(['leaves', 'الإجازات']);
+  if (can('viewAudit')) n.push(['audit', 'سجل التعديلات']);
   if (isAdmin()) n.push(['users', 'المستخدمون وكلمات المرور'], ['departments', 'الأقسام'], ['permissions', 'تحديد الصلاحيات']);
   n.push(['settings', 'الإعدادات والحساب']);
   return n;
 }
-const footer = () => `<div class="foot">${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>تصميم وتطوير: ${esc(CFG.AUTHOR || '')} · <span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span> · الإصدار ${esc(CFG.VERSION || '')}</div>`;
+const waLink = () => CFG.AUTHOR_PHONE ? `<a href="https://wa.me/${'964' + String(CFG.AUTHOR_PHONE).replace(/^0/, '')}" target="_blank" rel="noopener" dir="ltr">${esc(CFG.AUTHOR_PHONE)} (واتساب)</a>` : '';
+const footer = () => `<div class="foot">${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>تصميم وتطوير: ${esc(CFG.AUTHOR || '')} · <span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span> · ${waLink()} · الإصدار ${esc(CFG.VERSION || '')}</div>`;
 const logoImg = () => '<img src="logo.png" class="logo" alt="" onerror="this.remove()">';
 function renderShell() {
   $('#app').innerHTML = `<div class="shell">
@@ -199,12 +202,15 @@ function attInit(subjId, type) {
     att.no = n; attLoad();
   }
 }
+const leaveFor = (st, date) => live('leaves').find(l => l.deptId === st.deptId && l.from <= date && date <= l.to && (l.scope === 'dept' || (l.scope === 'stage' && String(l.stage) === String(st.stage)) || (l.scope === 'student' && l.studentId === st.id)));
+function leavePrefill(s) { studentsOf(s, att.section).forEach(x => { if (leaveFor(x, att.date)) att.states[x.id] = 'excused'; }); }
 function attLoad() {
   const s = get('subjects', att.subjectId); if (!s) return;
   const id = sessKey(s.id, att.type, att.no, att.section);
   const ex = get('sessions', id);
   att.states = {}; att.existing = !!ex;
   if (ex) { att.date = ex.date; live('absences').forEach(a => { if (a.sessionId === id) att.states[a.studentId] = a.status; }); }
+  else leavePrefill(s);
 }
 function attendScreen(el) {
   const pairs = attPairs();
@@ -229,19 +235,19 @@ function attendScreen(el) {
     <input type="date" id="aDate" value="${att.date}">
     ${!s.section && sections.length > 1 ? `<select id="aSec"><option value="">كل الشعب</option>${sections.map(x => `<option${x === att.section ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
    </div>
-   <p class="muted" style="margin:8px 0 0">${att.existing ? (locked ? '🔒 هذه المحاضرة مسجّلة ولا تملك صلاحية تعديلها.' : '⚠ هذه المحاضرة مسجّلة سابقاً — يمكنك تعديلها.') : 'اضغط على النقطة أمام اسم الطالب لتحديد حالته (الأصل: حاضر). «أول ساعة» = حضر الساعة الأولى فقط، «آخر ساعة» = حضر الساعة الأخيرة فقط.'}</p></div>
-  ${recd.size ? `<div class="card"><h3 style="margin:0 0 8px">المحاضرات المسجّلة</h3><div class="chips">${[...recd.entries()].sort((x, y) => x[0] - y[0]).map(([n, x]) => `<button class="chip${n === att.no ? ' on' : ''}" data-lec="${n}">${n === att.no ? '' : (can('editAttendance') ? '✏ ' : '👁 ')}محاضرة ${n} · ${esc(x.date || '')}</button>`).join('')}</div><p class="muted" style="margin:6px 0 0">${can('editAttendance') ? 'اضغط على محاضرة لفتحها وتعديل حضورها أو حذفها.' : 'اضغط لعرض الحضور فقط — لا تملك صلاحية التعديل.'}</p></div>` : ''}
+   <p class="muted" style="margin:8px 0 0">${att.existing ? (locked ? '🔒 هذه المحاضرة مسجّلة ولا تملك صلاحية تعديلها.' : '⚠ هذه المحاضرة مسجّلة سابقاً — يمكنك تعديلها.') : 'اضغط على النقطة أمام اسم الطالب لتحديد حالته (الأصل: حاضر، ومن لديه إجازة مسجّلة يُوضع «مجاز» تلقائياً ويمكنك تغييره). «أول ساعة» = حضر الساعة الأولى فقط، «آخر ساعة» = حضر الساعة الأخيرة فقط.'}</p></div>
+  ${recd.size ? `<div class="card"><h3 style="margin:0 0 8px">المحاضرات المسجّلة</h3><div class="chips">${[...recd.entries()].sort((x, y) => x[0] - y[0]).map(([n, x]) => `<button class="chip${n === att.no ? ' on' : ''}" data-lec="${n}">${n === att.no ? '' : (can('editAttendance') ? '✏ ' : '👁 ')}محاضرة ${n} · ${esc(x.date || '')}</button>`).join('')}</div><p class="muted" style="margin:6px 0 0">${can('editAttendance') ? 'اضغط على محاضرة لفتحها وتعديل حضورها' + (can('deleteAttendance') ? ' أو حذفها.' : ' (الحذف غير مسموح لك).') : 'اضغط لعرض الحضور فقط — لا تملك صلاحية التعديل.'}</p></div>` : ''}
   <div class="card" style="padding:0">
    <div class="filters" style="padding:10px;margin:0"><input type="search" id="aQ" placeholder="بحث عن طالب…" value="${esc(att.q)}"><button class="btn ghost sm" id="aAll">الكل حاضر</button></div>
    ${list.length ? `<div class="bhead"><span class="n"></span><span class="nm"></span>${Object.keys(STATUS).map(k => `<span class="bc">${BSHORT[k]}</span>`).join('')}</div>` : ''}
-   <div id="aList">${list.length ? list.filter(x => !q || x.name.includes(q)).map((x, i) => { const cur = att.states[x.id] || 'present'; return `<div class="stu ${att.states[x.id] || ''}" data-id="${x.id}"><span class="n">${i + 1}</span><span class="nm">${esc(x.name)}${x.section ? ' <span class="muted">(' + esc(x.section) + ')</span>' : ''}</span>${Object.keys(STATUS).map(k => `<span class="bc"><span class="bub b-${k}${k === cur ? ' on' : ''}" data-s="${k}" role="radio" aria-checked="${k === cur}" aria-label="${STATUS[k]}"></span></span>`).join('')}</div>`; }).join('') : '<div class="empty">لا يوجد طلبة مطابقون لهذه المادة/المرحلة/الشعبة.</div>'}</div>
+   <div id="aList">${list.length ? list.filter(x => !q || x.name.includes(q)).map((x, i) => { const cur = att.states[x.id] || 'present'; return `<div class="stu ${att.states[x.id] || ''}" data-id="${x.id}"><span class="n">${i + 1}</span><span class="nm">${esc(x.name)}${x.section ? ' <span class="muted">(' + esc(x.section) + ')</span>' : ''}${leaveFor(x, att.date) ? ' <span class="badge exc">إجازة</span>' : ''}</span>${Object.keys(STATUS).map(k => `<span class="bc"><span class="bub b-${k}${k === cur ? ' on' : ''}" data-s="${k}" role="radio" aria-checked="${k === cur}" aria-label="${STATUS[k]}"></span></span>`).join('')}</div>`; }).join('') : '<div class="empty">لا يوجد طلبة مطابقون لهذه المادة/المرحلة/الشعبة.</div>'}</div>
    <div class="sticky-save"><span>غائب <b>${cnt.absent}</b> · جزئي <b>${cnt.part}</b> · مجاز <b>${cnt.excused}</b> · متأخر <b>${cnt.late}</b> · من ${list.length}</span><span class="grow"></span>
-    ${can('exportData') ? '<button class="btn ghost sm" id="aExp">تصدير الكشف</button>' : ''}${att.existing && !locked ? '<button class="btn danger sm" id="aDel">حذف المحاضرة</button>' : ''}${locked ? '' : `<button class="btn" id="aSave">${att.existing ? 'حفظ التعديل' : 'حفظ المحاضرة'}</button>`}</div></div>`;
+    ${can('exportData') ? '<button class="btn ghost sm" id="aExp">تصدير الكشف</button>' : ''}${att.existing && can('deleteAttendance') ? '<button class="btn danger sm" id="aDel">حذف المحاضرة</button>' : ''}${locked ? '' : `<button class="btn" id="aSave">${att.existing ? 'حفظ التعديل' : 'حفظ المحاضرة'}</button>`}</div></div>`;
   const rerender = () => attendScreen(el);
   $('#aSub').onchange = e => { const [id, ty] = e.target.value.split('|'); attInit(id, ty); rerender(); };
   $('#aNo').onchange = e => { att.no = Number(e.target.value) || 1; att.date = today(); attLoad(); rerender(); };
   el.querySelectorAll('[data-lec]').forEach(c => c.onclick = () => { att.no = Number(c.dataset.lec); att.date = today(); attLoad(); rerender(); window.scrollTo(0, 0); });
-  $('#aDate').onchange = e => { att.date = e.target.value || today(); };
+  $('#aDate').onchange = e => { att.date = e.target.value || today(); if (!att.existing) { att.states = {}; leavePrefill(s); rerender(); } };
   if ($('#aSec')) $('#aSec').onchange = e => { att.section = e.target.value; att.date = today(); attLoad(); rerender(); };
   $('#aQ').oninput = e => { att.q = e.target.value; const p = e.target.selectionStart; rerender(); const n = $('#aQ'); n.focus(); n.setSelectionRange(p, p); };
   $('#aAll').onclick = () => { att.states = {}; rerender(); };
@@ -380,6 +386,7 @@ const personOptsAll = deptId => live('teachers').filter(t => !deptId || t.deptId
 const deptField = () => isAdmin() ? [{ key: 'deptId', label: 'القسم', type: 'select', options: deptOpts(), required: true, blank: false }] : [];
 const myDeptFilter = r => isAdmin() || r.deptId === me().deptId;
 
+const LSCOPE = { student: 'طالب محدد', stage: 'مرحلة كاملة', dept: 'كل طلبة القسم' };
 const MANAGE = {
   students: {
     title: 'طالب', table: 'students', stageFilter: true,
@@ -422,6 +429,29 @@ const MANAGE = {
       if (o.labId && o.labId === o.labAltId) throw new Error('البديل يجب أن يختلف عن الأساسي');
     }
   },
+  leaves: {
+    title: 'إجازة', table: 'leaves',
+    cols: [['المشمول', r => esc(r.name || '') + ' <span class="muted">(' + LSCOPE[r.scope] + ')</span>'], ['من', r => esc(r.from)], ['إلى', r => esc(r.to)], ['السبب', r => esc(r.reason || '')], ['القسم', r => esc(deptName(r.deptId))]],
+    fields: () => [{ key: 'scope', label: 'نوع الإجازة', type: 'select', blank: false, required: true, def: 'student', options: Object.entries(LSCOPE) },
+      { key: 'who', label: 'اسم الطالب أو رقمه الجامعي (لإجازة الطالب فقط)' },
+      { key: 'stage', label: 'المرحلة (لإجازة المرحلة فقط)', type: 'select', options: optStages() },
+      { key: 'from', label: 'من تاريخ', type: 'date', required: true }, { key: 'to', label: 'إلى تاريخ', type: 'date', required: true },
+      { key: 'reason', label: 'السبب (اختياري، لا يظهر للتدريسي)' }, ...deptField()],
+    perm: 'manageLeaves',
+    expHead: ['المشمول', 'النوع', 'من', 'إلى', 'السبب'], expRow: r => [r.name, LSCOPE[r.scope], r.from, r.to, r.reason || ''],
+    clean: v => { v.stage = v.stage ? Number(v.stage) : ''; return v; },
+    prepare: (out, rec) => {
+      if (out.to < out.from) throw new Error('تاريخ النهاية قبل البداية');
+      if (out.scope === 'student') {
+        const q = String(out.who || (rec && rec.name) || '').trim(); if (!q) throw new Error('اكتب اسم الطالب أو رقمه الجامعي');
+        const m = live('students').filter(x => x.deptId === out.deptId && (x.name === q || (x.studentNo && x.studentNo === q)));
+        if (!m.length) throw new Error('لم يُعثر على طالب بهذا الاسم أو الرقم في القسم'); if (m.length > 1) throw new Error('يوجد أكثر من طالب بهذا الاسم، استخدم الرقم الجامعي');
+        out.studentId = m[0].id; out.name = m[0].name; out.stage = m[0].stage; out.section = m[0].section || '';
+      } else if (out.scope === 'stage') { if (!out.stage) throw new Error('اختر المرحلة'); out.name = 'المرحلة ' + STAGE[out.stage]; out.studentId = ''; out.section = ''; }
+      else { out.name = 'كل طلبة القسم'; out.studentId = ''; out.stage = ''; out.section = ''; }
+      delete out.who;
+    }
+  },
   departments: {
     title: 'قسم', table: 'departments', noDept: true,
     cols: [['القسم', r => esc(r.name)]], fields: () => [{ key: 'name', label: 'اسم القسم', required: true }],
@@ -449,11 +479,11 @@ function manageScreen(kind) {
     if (isAdmin() && V.dept && !C.noDept) rows = rows.filter(r => r.deptId === V.dept);
     if (V.stage) rows = rows.filter(r => String(r.stage) === V.stage);
     if (V.q) rows = rows.filter(r => (r.name + ' ' + (r.studentNo || '') + ' ' + (r.username || '')).includes(V.q));
-    rows.sort(byName);
+    if (kind === 'leaves') rows.sort((a, b) => b.from.localeCompare(a.from)); else rows.sort(byName);
     el.innerHTML = `<div class="filters"><input type="search" id="mq" placeholder="بحث…" value="${esc(V.q)}">
       ${C.stageFilter ? `<select id="ms"><option value="">كل المراحل</option>${optStages().map(o => `<option value="${o[0]}"${o[0] === V.stage ? ' selected' : ''}>${o[1]}</option>`).join('')}</select>` : ''}
       ${isAdmin() && !C.noDept ? `<select id="md"><option value="">كل الأقسام</option>${deptOpts().map(o => `<option value="${o[0]}"${o[0] === V.dept ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>` : ''}
-      <button class="btn" id="madd">+ إضافة ${C.title}</button>${can('importData') ? '<button class="btn ghost" id="mimp">استيراد CSV</button>' : ''}${can('exportData') ? '<button class="btn ghost" id="mexp">تصدير CSV</button>' : ''}</div>
+      <button class="btn" id="madd">+ إضافة ${C.title}</button>${can('importData') && C.impHelp ? '<button class="btn ghost" id="mimp">استيراد CSV</button>' : ''}${can('exportData') ? '<button class="btn ghost" id="mexp">تصدير CSV</button>' : ''}</div>
      <div class="card" style="padding:0"><div class="muted" style="padding:8px 12px">العدد: ${rows.length}</div><div class="tblwrap"><table><thead><tr>${C.cols.map(c => `<th>${c[0]}</th>`).join('')}<th></th></tr></thead><tbody>
      ${rows.slice(0, V.limit).map(r => `<tr>${C.cols.map(c => `<td>${c[1](r)}</td>`).join('')}<td><button class="btn ghost sm" data-e="${r.id}">تعديل</button> ${C.lockSelf && r.id === me().id ? '' : `<button class="btn danger sm" data-d="${r.id}">حذف</button>`}</td></tr>`).join('') || `<tr><td colspan="${C.cols.length + 1}" class="empty">لا توجد سجلات</td></tr>`}</tbody></table></div>
      ${rows.length > V.limit ? '<div class="row end" style="padding:10px"><button class="btn ghost" id="mmore">عرض المزيد</button></div>' : ''}</div>`;
@@ -474,7 +504,7 @@ function manageScreen(kind) {
 function editRec(kind, rec, el) {
   const C = MANAGE[kind];
   openForm({
-    title: (rec ? 'تعديل ' : 'إضافة ') + C.title, fields: C.fields(rec), values: rec ? Object.assign({}, rec) : { active: true },
+    title: (rec ? 'تعديل ' : 'إضافة ') + C.title, fields: C.fields(rec), values: rec ? Object.assign({}, rec, kind === 'leaves' ? { who: rec.scope === 'student' ? rec.name : '' } : {}) : { active: true },
     onSave: async v => {
       if (C.clean) v = C.clean(v);
       const base = rec ? Object.assign({}, rec) : { id: uid(kind[0]), deleted: false };
@@ -482,6 +512,7 @@ function editRec(kind, rec, el) {
       if (!C.noDept && !isAdmin()) out.deptId = me().deptId;
       if (!C.noDept && !out.deptId) throw new Error('اختر القسم');
       if (kind === 'users' && out.role === 'teacher' && !out.teacherId) throw new Error('اربط المستخدم بسجل التدريسي / مسؤول المختبر');
+      if (C.prepare) C.prepare(out, rec);
       if (C.validate) C.validate(out);
       await saveRec(C.table, out); toast('تم الحفظ'); manageScreen(kind)(el);
     }
@@ -618,7 +649,7 @@ function settingsScreen(el) {
    <p class="muted">النسخة تشمل كل ما تراه من أقسام وتدريسيين وطلبة ومواد ومحاضرات وغيابات (بدون كلمات المرور).</p></div>` : ''}
   ${isAdmin() ? `<div class="card"><h2>حدود الإنذار والحرمان</h2><form id="sForm"><div class="row"><label class="f grow">نسبة الإنذار %<input name="warnPct" type="number" min="1" max="100" value="${S.warnPct}"></label><label class="f grow">نسبة الحرمان %<input name="banPct" type="number" min="1" max="100" value="${S.banPct}"></label><label class="f grow">وزن الغياب الجزئي (0.5 = نصف غياب)<input name="pw" type="number" min="0" max="1" step="0.1" value="${S.partialWeight}"></label></div>
    <button class="btn">حفظ</button></form><p class="muted">القيم الافتراضية للتجربة؛ عدّلها حسب تعليمات الكلية.</p></div>` : ''}
-  <div class="card"><h2>حول التطبيق</h2><p>${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>نظام متابعة غيابات الطلبة (يعمل بدون إنترنت)<br>تصميم وتطوير: <b>${esc(CFG.AUTHOR || '')}</b><br><span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span><br>الإصدار ${esc(CFG.VERSION || '')}</p></div>`;
+  <div class="card"><h2>حول التطبيق</h2><p>${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>نظام متابعة غيابات الطلبة (يعمل بدون إنترنت)<br>تصميم وتطوير: <b>${esc(CFG.AUTHOR || '')}</b><br><span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span><br>${waLink()}<br>الإصدار ${esc(CFG.VERSION || '')}</p></div>`;
   $('#sNow').onclick = () => syncNow(true);
   $('#sFull').onclick = async () => { state.since = 0; await metaSet('since', 0); await syncNow(true); toast('تمت إعادة التنزيل'); };
   $('#sRe').onclick = () => { $('#app').innerHTML = ''; renderLogin(); };
@@ -671,10 +702,28 @@ function permsScreen(el) {
   };
 }
 
+/* ---------- سجل التعديلات ---------- */
+const AUDIT_ACT = { record: 'تسجيل محاضرة', edit: 'تعديل حضور', delete: 'حذف محاضرة', 'user-add': 'إضافة مستخدم', 'user-edit': 'تعديل مستخدم', 'user-delete': 'حذف مستخدم', settings: 'تعديل الإعدادات/الصلاحيات', 'leave-add': 'إضافة إجازة', 'leave-edit': 'تعديل إجازة', 'leave-delete': 'حذف إجازة' };
+let af = { act: '', q: '', limit: 100 };
+function auditScreen(el) {
+  const all = live('audit').sort((a, b) => b.at - a.at);
+  const rows = all.filter(r => (!af.act || r.action === af.act) && (!af.q || [r.userName, r.subjectName, r.detail].join(' ').includes(af.q)));
+  const fmt = t => new Date(t).toLocaleString('ar-IQ', { dateStyle: 'short', timeStyle: 'short' });
+  const what = r => r.sessionId ? `${esc(r.subjectName || '')} — ${TYPE[r.type || 'theory']} — محاضرة ${r.lectureNo || ''}${r.date ? ' (' + esc(r.date) + ')' : ''}` : '';
+  el.innerHTML = `<div class="card"><h2>سجل التعديلات</h2><p class="muted">يُسجَّل تلقائياً في الخادم من فعل ماذا ومتى، ولا يمكن تعديله من التطبيق. يظهر هنا بعد المزامنة.</p>
+   <div class="filters"><select id="afA"><option value="">كل العمليات</option>${Object.entries(AUDIT_ACT).map(([k, l]) => `<option value="${k}"${k === af.act ? ' selected' : ''}>${l}</option>`).join('')}</select>
+   <input type="search" id="afQ" placeholder="بحث بالاسم أو المادة أو الطالب…" value="${esc(af.q)}">${can('exportData') ? '<button class="btn ghost" id="afX">تصدير CSV</button>' : ''}</div></div>
+  <div class="card" style="padding:0">${rows.length ? rows.slice(0, af.limit).map(r => `<div class="logrow"><div class="lg-h"><b>${esc(AUDIT_ACT[r.action] || r.action)}</b> · ${esc(r.userName || '')} <span class="muted">(${ROLE[r.role] || ''})</span><span class="grow"></span><span class="muted">${fmt(r.at)}</span></div>${what(r) ? `<div>${what(r)}</div>` : ''}${r.detail ? `<div class="muted" style="white-space:pre-line">${esc(r.detail)}</div>` : ''}</div>`).join('') + (rows.length > af.limit ? '<div class="row end" style="padding:10px"><button class="btn ghost" id="afM">عرض المزيد</button></div>' : '') : '<div class="empty">لا توجد سجلات بعد.</div>'}</div>`;
+  $('#afA').onchange = e => { af.act = e.target.value; af.limit = 100; auditScreen(el); };
+  $('#afQ').oninput = e => { af.q = e.target.value; const p = e.target.selectionStart; af.limit = 100; auditScreen(el); const n = $('#afQ'); n.focus(); n.setSelectionRange(p, p); };
+  if ($('#afM')) $('#afM').onclick = () => { af.limit += 100; auditScreen(el); };
+  if ($('#afX')) $('#afX').onclick = () => downloadCsv('سجل-التعديلات-' + today() + '.csv', [['الوقت', 'المستخدم', 'الدور', 'العملية', 'المادة', 'النوع', 'المحاضرة', 'التفاصيل']].concat(rows.map(r => [fmt(r.at), r.userName, ROLE[r.role] || '', AUDIT_ACT[r.action] || r.action, r.subjectName || '', r.sessionId ? TYPE[r.type || 'theory'] : '', r.lectureNo || '', (r.detail || '').replace(/\n/g, ' ; ')])));
+}
+
 const SCREENS = {
   home: homeScreen, attend: attendScreen, reports: reportsScreen,
   students: manageScreen('students'), teachers: manageScreen('teachers'), subjects: manageScreen('subjects'),
-  users: manageScreen('users'), departments: manageScreen('departments'), settings: settingsScreen, permissions: permsScreen
+  users: manageScreen('users'), departments: manageScreen('departments'), settings: settingsScreen, permissions: permsScreen, audit: auditScreen, leaves: manageScreen('leaves')
 };
 
 /* ---------- الإقلاع ---------- */
