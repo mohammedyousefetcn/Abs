@@ -5,7 +5,7 @@ const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'ف�
 const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '1.7';
+const APP_BUILD = '1.9';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
@@ -32,6 +32,8 @@ const byName = (a, b) => String(a.name).localeCompare(String(b.name), 'ar');
 const me = () => state.user;
 const isAdmin = () => me().role === 'admin';
 const canUsers = () => me().role === 'admin';
+const normName = s => String(s || '').replace(/[\u064B-\u0652\u0640]/g, '').replace(/[إأآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/\s+/g, ' ').trim().toLowerCase();
+const dupDept = o => live('departments').some(d => d.id !== o.id && String(d.parentId || '') === String(o.parentId || '') && normName(d.name) === normName(o.name));
 const deptName = id => (get('departments', id) || {}).name || '—';
 const teacherName = id => (get('teachers', id) || {}).name || '—';
 const subjectName = id => (get('subjects', id) || {}).name || '—';
@@ -535,13 +537,14 @@ const MANAGE = {
   },
   branches: {
     title: 'فرع', table: 'departments', noDept: true, rowFilter: r => r.parentId === me().deptId,
-    cols: [['الفرع', r => esc(r.name)], ['يتبع', r => esc(deptName(r.parentId))]], fields: () => [{ key: 'name', label: 'اسم الفرع', required: true }],
+    cols: [['الفرع', r => esc(r.name)], ['يتبع', r => esc(deptName(r.parentId) !== '—' ? deptName(r.parentId) : deptName(me().deptId))]], fields: () => [{ key: 'name', label: 'اسم الفرع', required: true }], validate: o => { if (dupDept(o)) throw new Error('يوجد فرع بنفس الاسم'); },
     clean: v => { v.parentId = me().deptId; return v; }, perm: 'manageBranches', expHead: ['الفرع'], expRow: r => [r.name], impHelp: ''
   },
   departments: {
     title: 'قسم', table: 'departments', noDept: true,
     cols: [['القسم', r => esc(r.name)], ['يتبع (إن كان فرعاً)', r => r.parentId ? esc(deptName(r.parentId)) : '']],
     fields: rec => [{ key: 'name', label: 'اسم القسم أو الفرع', required: true }, { key: 'parentId', label: 'يتبع القسم (اتركه فارغاً لقسم رئيسي، أو اختر القسم لجعله فرعاً له)', type: 'select', options: live('departments').filter(d => !d.parentId && (!rec || d.id !== rec.id)).sort(byName).map(d => [d.id, d.name]) }],
+    validate: o => { if (dupDept(o)) throw new Error('يوجد قسم/فرع بنفس الاسم'); },
     perm: 'admin', expHead: ['القسم', 'يتبع'], expRow: r => [r.name, r.parentId ? deptName(r.parentId) : ''], impHelp: 'عمود واحد: <b>اسم القسم</b>.'
   },
   users: {
@@ -743,8 +746,8 @@ const IMPORTERS = {
   },
   departments: async rows => {
     if (rows.length && /القسم|name/i.test(rows[0][0])) rows = rows.slice(1);
-    const exist = new Set(live('departments').map(d => d.name)); const recs = []; let skipped = 0;
-    rows.forEach(r => { const n = (r[0] || '').trim(); if (!n || exist.has(n)) { skipped++; return; } exist.add(n); recs.push({ id: uid('d'), name: n, deleted: false }); });
+    const exist = new Set(live('departments').filter(d => !d.parentId).map(d => normName(d.name))); const recs = []; let skipped = 0;
+    rows.forEach(r => { const n = (r[0] || '').trim(); if (!n || exist.has(normName(n))) { skipped++; return; } exist.add(normName(n)); recs.push({ id: uid('d'), name: n, deleted: false }); });
     if (recs.length) await saveRecs('departments', recs);
     return { count: recs.length, skipped };
   },
