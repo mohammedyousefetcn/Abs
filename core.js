@@ -46,7 +46,7 @@ async function loadAll() {
   for (const t of TABLES) { DB[t] = new Map((await dbAll(t)).map(r => [r.id, r])); }
   const s = await metaGet('session');
   if (s) { state.token = s.token; state.user = s.user; }
-  state.apiUrl = (await metaGet('apiUrl')) || (window.APP_CONFIG && window.APP_CONFIG.API_URL) || '';
+  state.apiUrl = (window.APP_CONFIG && window.APP_CONFIG.API_URL) || (await metaGet('apiUrl')) || '';
   state.since = (await metaGet('since')) || 0;
   state.offset = (await metaGet('offset')) || 0;
   await refreshPending();

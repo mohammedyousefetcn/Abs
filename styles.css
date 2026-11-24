@@ -36,7 +36,7 @@ label.f>input,label.f>select,label.f>textarea{display:block;width:100%;margin-to
 label.f.chk{display:flex;gap:8px;align-items:center}
 label.f.chk input{width:auto;margin:0}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.filters>*{padding:8px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+.filters>:not(.btn){padding:8px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
 .filters input[type=search]{flex:1;min-width:140px}
 .tblwrap{overflow:auto}
 table{width:100%;border-collapse:collapse;background:#fff}
@@ -87,3 +87,14 @@ td.wrap{white-space:normal}
  main{padding:10px}
 }
 @media print{.side,.top,.filters,.sticky-save,.btn{display:none!important}}
+
+.logo{width:56px;height:56px;object-fit:contain;background:#fff;border-radius:10px;padding:3px;display:block;margin-bottom:8px}
+.brand-u{font-weight:700}.brand-c{font-size:.85rem;opacity:.9}
+.foot{margin:24px 0 8px;text-align:center;color:var(--mu);font-size:.8rem;line-height:1.7}
+.stu.pfirst,.stu.plast{background:#f5f3ff;border-inline-start-color:#7c3aed}
+.badge.part{background:#7c3aed}
+.opt{display:block;width:100%;text-align:right;margin:6px 0;padding:12px;border:1px solid var(--bd);border-radius:10px;background:#fff;cursor:pointer;font-size:1rem}
+.opt:hover{background:#f0fdfa;border-color:var(--p)}
+.opt.on{border:2px solid var(--p);font-weight:700}
+.ptable td,.ptable th{text-align:center}.ptable td:first-child,.ptable th:first-child{text-align:right}
+.ptable input{width:22px;height:22px}
