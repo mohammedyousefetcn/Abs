@@ -1,7 +1,7 @@
 'use strict';
 /* النواة: التخزين المحلي (IndexedDB) + قائمة الانتظار + المزامنة مع Apps Script */
 const TABLES = ['departments', 'teachers', 'subjects', 'students', 'sessions', 'absences', 'users', 'settings', 'audit', 'leaves'];
-const state = { apiUrl: '', token: '', user: null, since: 0, offset: 0, pending: 0, status: 'idle', lastSync: 0, error: '' };
+const state = { apiUrl: '', token: '', user: null, since: 0, epoch: '', offset: 0, pending: 0, status: 'idle', lastSync: 0, error: '' };
 const DB = {};
 TABLES.forEach(t => DB[t] = new Map());
 let idb = null;
@@ -48,6 +48,7 @@ async function loadAll() {
   if (s) { state.token = s.token; state.user = s.user; }
   state.apiUrl = (window.APP_CONFIG && window.APP_CONFIG.API_URL) || (await metaGet('apiUrl')) || '';
   state.since = (await metaGet('since')) || 0;
+  state.epoch = (await metaGet('epoch')) || '';
   state.offset = (await metaGet('offset')) || 0;
   await refreshPending();
 }
@@ -77,10 +78,14 @@ const removeRec = (t, r) => saveRec(t, Object.assign({}, r, { deleted: true }));
 /* ---------- الشبكة ---------- */
 async function api(action, payload) {
   if (!state.apiUrl) throw new Error('لم يُضبط رابط الخدمة');
-  const r = await fetch(state.apiUrl, {
-    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(Object.assign({ action, token: state.token }, payload || {}))
-  });
+  const ac = new AbortController(), to = setTimeout(() => ac.abort(), 45000);
+  let r;
+  try {
+    r = await fetch(state.apiUrl, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, signal: ac.signal,
+      body: JSON.stringify(Object.assign({ action, token: state.token }, payload || {}))
+    });
+  } catch (e) { throw new Error(e.name === 'AbortError' ? 'انتهت مهلة الاتصال' : 'تعذّر الاتصال بالخادم'); } finally { clearTimeout(to); }
   if (!r.ok) throw new Error('خطأ في الاتصال (' + r.status + ')');
   return r.json();
 }
@@ -113,22 +118,36 @@ async function logout() {
 }
 
 /* ---------- المزامنة ---------- */
-let syncing = false, timer = null;
-function scheduleSync(ms) { clearTimeout(timer); timer = setTimeout(syncNow, ms || 2500); }
+let syncing = false, syncStart = 0, timer = null, errCount = 0;
+function scheduleSync(ms) { clearTimeout(timer); timer = setTimeout(syncNow, ms || 2500); registerBgSync(); }
+/** مزامنة في الخلفية عبر الـ Service Worker (أندرويد/كروم): تُنفَّذ عند عودة الإنترنت حتى لو أُغلق التطبيق */
+async function registerBgSync() {
+  try {
+    if (!('serviceWorker' in navigator)) return;
+    const reg = await navigator.serviceWorker.ready;
+    if (reg.sync) await reg.sync.register('abs-sync');
+    if (reg.periodicSync && !registerBgSync.p) { registerBgSync.p = 1; await reg.periodicSync.register('abs-periodic', { minInterval: 15 * 60 * 1000 }); }
+  } catch (e) { /* غير مدعوم */ }
+}
 
 async function syncNow(force) {
-  if (syncing || !state.token || !state.apiUrl) return;
+  if (syncing && Date.now() - syncStart < 60000) return;
+  if (!state.token || !state.apiUrl) return;
   if (!navigator.onLine) { setStatus('offline'); return; }
-  syncing = true; setStatus('syncing');
+  syncing = true; syncStart = Date.now(); setStatus('syncing');
   let changed = false;
   try {
     for (let round = 0; round < 50; round++) {
       const outbox = (await dbAll('outbox')).slice(0, 400);
-      const res = await api('sync', { since: state.since, ops: outbox.map(o => ({ table: o.table, rec: o.rec })) });
+      const res = await api('sync', { since: state.since, epoch: state.epoch, ops: outbox.map(o => ({ table: o.table, rec: o.rec })) });
       if (!res.ok) {
         if (res.code === 'auth') { state.token = ''; await metaSet('session', { token: '', user: state.user }); emit('auth'); return; }
         throw new Error(res.error || 'فشلت المزامنة');
       }
+      if (res.reset) { // صُفّر البرنامج من جهاز آخر: امسح النسخة المحلية وأعد التنزيل
+        await wipeLocal(); state.epoch = res.epoch; await metaSet('epoch', res.epoch); changed = true; continue;
+      }
+      if (res.epoch && res.epoch !== state.epoch) { state.epoch = res.epoch; await metaSet('epoch', res.epoch); }
       state.offset = res.serverTime - Date.now();
       await metaSet('offset', state.offset);
       // حذف العمليات المُرسَلة التي لم تتغير محلياً بعد الإرسال
@@ -163,16 +182,22 @@ async function syncNow(force) {
     }
     await refreshPending();
     state.lastSync = Date.now(); state.error = '';
+    errCount = 0;
     setStatus(state.pending ? 'pending' : 'ok');
     if (changed) emit('remote');
+    if (state.pending) scheduleSync(8000);
   } catch (e) {
     state.error = e.message || String(e);
     await refreshPending();
     setStatus(navigator.onLine ? 'error' : 'offline');
+    errCount++; if (navigator.onLine && state.token) scheduleSync(Math.min(60000, 4000 * Math.pow(2, errCount)));
   } finally { syncing = false; }
 }
 function setStatus(s) { state.status = s; emit('status'); }
 
 window.addEventListener('online', () => syncNow());
 window.addEventListener('offline', () => setStatus('offline'));
-setInterval(() => { if (state.token) syncNow(); }, 180000);
+setInterval(() => { if (state.token && navigator.onLine && !document.hidden) syncNow(); }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.token) syncNow(); });
+window.addEventListener('focus', () => { if (state.token) syncNow(); });
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'abs-sync') syncNow(); });

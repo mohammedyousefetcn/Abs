@@ -5,7 +5,7 @@ const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'ف�
 const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '2.1';
+const APP_BUILD = '1.0';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
@@ -110,11 +110,11 @@ function navItems() {
   return n;
 }
 const waLink = () => CFG.AUTHOR_PHONE ? `<a href="https://wa.me/${'964' + String(CFG.AUTHOR_PHONE).replace(/^0/, '')}" target="_blank" rel="noopener" dir="ltr">${esc(CFG.AUTHOR_PHONE)} (واتساب)</a>` : '';
-const footer = () => `<div class="foot">${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>تصميم وتطوير: ${esc(CFG.AUTHOR || '')} · <span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span> · ${waLink()} · الإصدار ${esc(APP_BUILD)}${CFG.VERSION !== APP_BUILD ? ' ⚠' : ''}</div>`;
-const logoImg = () => '<img src="logo.png" class="logo" alt="" onerror="this.remove()">';
+const footer = () => `<div class="foot">${esc(brand().university || '')} — ${esc(brand().college || '')}<br>تصميم وتطوير: ${esc(CFG.AUTHOR || '')} · <span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span> · ${waLink()} · الإصدار ${esc(APP_BUILD)}${CFG.VERSION !== APP_BUILD ? ' ⚠' : ''}</div>`;
+const logoImg = () => `<img src="${esc(brand().logo || 'logo.png')}" class="logo" alt="" onerror="this.remove()">`;
 function renderShell() {
   $('#app').innerHTML = `<div class="shell">
-   <aside class="side" id="side"><div class="brand">${logoImg()}<div class="brand-u">${esc(CFG.UNIVERSITY || '')}</div><div class="brand-c">${esc(CFG.COLLEGE || '')}</div><small>${esc(me().name)} — ${ROLE[me().role]}</small></div>
+   <aside class="side" id="side"><div class="brand">${logoImg()}<div class="brand-u">${esc(brand().university || '')}</div><div class="brand-c">${esc(brand().college || '')}</div><small>${esc(me().name)} — ${ROLE[me().role]}</small></div>
     ${navItems().map(([k, l]) => `<a data-nav="${k}">${l}</a>`).join('')}</aside>
    <div class="content"><header class="top"><button id="menuBtn">☰</button><h1 id="title"></h1><div class="sync" id="syncBadge" title="مزامنة الآن"></div></header>
    <main id="main"></main>${footer()}</div></div>`;
@@ -131,6 +131,7 @@ function paintSync() {
 }
 function go(r) { route = r; location.hash = r; render(); }
 function render() {
+  applyBrand();
   if (!state.user) return renderLogin();
   if (!$('#main')) renderShell();
   const titles = Object.fromEntries(navItems());
@@ -144,7 +145,8 @@ function render() {
 
 /* ---------- الدخول ---------- */
 function renderLogin(msg) {
-  $('#app').innerHTML = `<div class="login"><div class="card" style="text-align:center">${logoImg().replace('class="logo"', 'class="logo" style="margin:0 auto 8px;width:80px;height:80px"')}<h2 style="margin-bottom:2px">${esc(CFG.UNIVERSITY || '')}</h2><div class="brand-c" style="color:var(--pd);font-weight:700">${esc(CFG.COLLEGE || '')}</div>
+  applyBrand();
+  $('#app').innerHTML = `<div class="login"><div class="card" style="text-align:center">${logoImg().replace('class="logo"', 'class="logo" style="margin:0 auto 8px;width:80px;height:80px"')}<h2 style="margin-bottom:2px">${esc(brand().university || '')}</h2><div class="brand-c" style="color:var(--pd);font-weight:700">${esc(brand().college || '')}</div>
   <p class="muted">نظام متابعة غيابات الطلبة</p><div style="text-align:right">
   ${msg ? `<p style="color:var(--bad)">${esc(msg)}</p>` : ''}
   <form id="lf"><label class="f">اسم المستخدم<input name="u" autocomplete="username" required></label>
@@ -458,7 +460,7 @@ function printReport(C, rows) {
   const bad = C.rows.filter(r => r.level === 'warn' || r.level === 'ban').sort((a, b) => b.pct - a.pct);
   const filt = [rf.dept && deptName(rf.dept), rf.stage && 'المرحلة ' + STAGE[rf.stage], rf.subject && subjectName(rf.subject), rf.section && 'شعبة ' + rf.section, rf.type && TYPE[rf.type], rf.from && 'من ' + rf.from, rf.to && 'إلى ' + rf.to].filter(Boolean).join(' · ') || 'كل البيانات';
   const dept = rf.dept ? deptName(rf.dept) : (u.role === 'admin' ? '' : deptName(u.deptId));
-  printHtml('تقرير الغياب', `<div class="hd"><img src="${new URL('logo.png', location.href).href}" onerror="this.remove()"><div><h1>${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}</h1><p>تقرير الغياب الرسومي ${dept ? '— ' + esc(dept) : ''}</p><p>${esc(filt)} · تاريخ الإصدار ${today()}</p></div></div>
+  printHtml('تقرير الغياب', `<div class="hd"><img src="${esc(brand().logo || new URL('logo.png', location.href).href)}" onerror="this.remove()"><div><h1>${esc(brand().university || '')} — ${esc(brand().college || '')}</h1><p>تقرير الغياب الرسومي ${dept ? '— ' + esc(dept) : ''}</p><p>${esc(filt)} · تاريخ الإصدار ${today()}</p></div></div>
   <div class="kp"><div><b>${C.sessions.length}</b>محاضرات مسجلة</div><div><b>${+totAbs.toFixed(1)}</b>إجمالي الغيابات (موزون)</div><div><b>${totPos ? (totAbs / totPos * 100).toFixed(1) : 0}%</b>نسبة الغياب العامة</div><div><b>${bad.length}</b>إنذار/حرمان</div></div>
   <div class="ch"><h2>نسبة الغياب حسب المادة</h2>${subs.length ? svgBars(subs) : '<p>لا بيانات</p>'}</div>
   <div class="row2"><div class="ch"><h2>نسبة الغياب حسب المرحلة (%)</h2>${stages.length ? svgCols(stages, '#2563eb') : '<p>لا بيانات</p>'}</div><div class="ch"><h2>توزيع الحالات المسجلة</h2>${svgDonut(donut)}</div></div>
@@ -787,6 +789,78 @@ function importModal(kind, after) {
   };
 }
 
+
+/* ---------- هوية التطبيق (الاسم/الشعار/الثيم) ---------- */
+const THEMES = [['#0f766e', 'أخضر مزرق'], ['#1d4ed8', 'أزرق'], ['#7c3aed', 'بنفسجي'], ['#b45309', 'برتقالي'], ['#be123c', 'أحمر'], ['#334155', 'رمادي']];
+function brand() {
+  let c = null; try { c = JSON.parse(localStorage.getItem('abs-brand') || 'null'); } catch (e) {}
+  const b = get('settings', 'brand') || c || {};
+  return { appName: b.appName || 'تسجيل حضور الطلبة', university: b.university != null && b.university !== '' ? b.university : (CFG.UNIVERSITY || ''), college: b.college != null && b.college !== '' ? b.college : (CFG.COLLEGE || ''), logo: b.logo || '', color: b.color || '#0f766e' };
+}
+function shade(hex, k) { const n = parseInt(hex.slice(1), 16); const f = v => Math.max(0, Math.min(255, Math.round(v * k))); return '#' + [n >> 16, (n >> 8) & 255, n & 255].map(f).map(v => v.toString(16).padStart(2, '0')).join(''); }
+function applyBrand() {
+  const b = brand(), r = document.documentElement.style;
+  r.setProperty('--p', b.color); r.setProperty('--pd', shade(b.color, .78));
+  document.title = b.appName;
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = b.color;
+  const own = get('settings', 'brand'); if (own) { try { localStorage.setItem('abs-brand', JSON.stringify(own)); } catch (e) {} }
+}
+/** تصغير الشعار المرفوع إلى حجم صغير يناسب التخزين (أقل من ~40 ألف حرف) */
+function shrinkLogo(file) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      for (const px of [192, 144, 112, 80]) {
+        const k = Math.min(1, px / Math.max(img.width, img.height)), c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        const d = c.toDataURL('image/png'); if (d.length < 40000) return res(d);
+        const j = c.toDataURL('image/jpeg', .85); if (j.length < 40000) return res(j);
+      }
+      rej(new Error('الصورة معقّدة جداً، اختر شعاراً أبسط'));
+    };
+    img.onerror = () => rej(new Error('تعذّر قراءة الصورة'));
+    img.src = url;
+  });
+}
+function brandCard() {
+  const b = brand();
+  return `<div class="card"><h2>هوية التطبيق (الشعار والثيم)</h2><p class="muted">يمكن استخدام التطبيق لكلية أو جامعة أخرى. التغيير يظهر لكل المستخدمين بعد مزامنتهم.</p>
+   <form id="brForm"><label class="f">اسم التطبيق<input name="appName" value="${esc(b.appName)}"></label>
+   <label class="f">اسم الجامعة<input name="university" value="${esc(b.university)}"></label><label class="f">اسم الكلية<input name="college" value="${esc(b.college)}"></label>
+   <div class="f"><span>الشعار</span><div class="row"><img id="brLogo" src="${esc(b.logo || 'logo.png')}" class="logo" style="width:64px;height:64px;margin:0" alt=""><input type="file" id="brFile" accept="image/*"><button type="button" class="btn ghost sm" id="brNoLogo">شعار افتراضي</button></div></div>
+   <div class="f"><span>لون الثيم</span><div class="row">${THEMES.map(t => `<button type="button" class="swatch${t[0] === b.color ? ' on' : ''}" data-c="${t[0]}" style="background:${t[0]}" title="${t[1]}"></button>`).join('')}<input type="color" id="brColor" value="${esc(b.color)}" title="لون مخصص"></div></div>
+   <div class="row"><button class="btn">حفظ الهوية</button><button type="button" class="btn ghost" id="brReset">استرجاع الافتراضي</button></div></form>
+   <p class="muted">ملاحظة: أيقونة التطبيق المثبّتة على الشاشة الرئيسية لا تتغير إلا بتغيير ملفات الأيقونات في مجلد app على GitHub.</p></div>`;
+}
+function bindBrand() {
+  let logo = brand().logo, color = brand().color;
+  const setC = c => { color = c; $('#brColor').value = c; document.querySelectorAll('.swatch').forEach(x => x.classList.toggle('on', x.dataset.c === c)); };
+  document.querySelectorAll('.swatch').forEach(x => x.onclick = () => setC(x.dataset.c));
+  $('#brColor').oninput = e => setC(e.target.value);
+  $('#brFile').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { logo = await shrinkLogo(f); $('#brLogo').src = logo; } catch (err) { toast(err.message, true); } };
+  $('#brNoLogo').onclick = () => { logo = ''; $('#brLogo').src = 'logo.png'; };
+  $('#brForm').onsubmit = async e => {
+    e.preventDefault(); const f = e.target;
+    await saveRec('settings', Object.assign({ id: 'brand', deleted: false }, get('settings', 'brand'), { appName: f.appName.value.trim(), university: f.university.value.trim(), college: f.college.value.trim(), logo, color }));
+    applyBrand(); toast('تم حفظ الهوية'); render();
+  };
+  $('#brReset').onclick = async () => { if (!confirm('استرجاع الاسم والشعار والثيم الافتراضية؟')) return; await saveRec('settings', { id: 'brand', deleted: false }); try { localStorage.removeItem('abs-brand'); } catch (e) {} applyBrand(); toast('تم الاسترجاع'); render(); };
+}
+/** تصفير البرنامج كاملاً (مدير النظام) مع إعادة إدخال كلمة المرور */
+function resetAllModal() {
+  openForm({ title: 'تصفير البرنامج كاملاً', fields: [{ key: 'pw', label: 'أعد إدخال كلمة مرور مدير النظام للتأكيد', type: 'password', required: true }],
+    onOpen: () => { const f = $('#mform'); f.insertAdjacentHTML('afterbegin', '<p style="color:#b91c1c;font-weight:bold">تحذير: سيُحذف كل شيء نهائياً (الأقسام، الكادر، الطلبة، المواد، المحاضرات، الغيابات، الإجازات، السجل وحسابات المستخدمين) على الخادم وكل الأجهزة. تبقى حسابات مدير النظام وهوية التطبيق. لا يمكن التراجع. صدّر نسخة احتياطية أولاً.</p>'); },
+    onSave: async v => {
+      if (!confirm('تأكيد أخير: حذف كل البيانات نهائياً؟')) return false;
+      if (!navigator.onLine) throw new Error('يلزم اتصال بالإنترنت');
+      const r = await api('resetAll', { password: v.pw }); if (!r.ok) throw new Error(r.error || 'فشل التصفير');
+      await wipeLocal(); state.epoch = r.epoch; await metaSet('epoch', r.epoch);
+      toast('تم تصفير البرنامج'); await syncNow(true); go('home');
+    } });
+}
+
 /* ---------- الإعدادات ---------- */
 function settingsScreen(el) {
   const S = settings();
@@ -799,7 +873,10 @@ function settingsScreen(el) {
    <p class="muted">النسخة تشمل كل ما تراه من أقسام وتدريسيين وطلبة ومواد ومحاضرات وغيابات (بدون كلمات المرور).</p></div>` : ''}
   ${isAdmin() ? `<div class="card"><h2>حدود الإنذار والحرمان</h2><form id="sForm"><div class="row"><label class="f grow">نسبة الإنذار %<input name="warnPct" type="number" min="1" max="100" value="${S.warnPct}"></label><label class="f grow">نسبة الحرمان %<input name="banPct" type="number" min="1" max="100" value="${S.banPct}"></label><label class="f grow">وزن «حضر الساعة الأولى/الأخيرة فقط» (0.5 = نصف غياب)<input name="pw" type="number" min="0" max="1" step="0.1" value="${S.partialWeight}"></label></div>
    <button class="btn">حفظ</button></form><p class="muted">القيم الافتراضية للتجربة؛ عدّلها حسب تعليمات الكلية.</p></div>` : ''}
-  <div class="card"><h2>حول التطبيق</h2><p>${esc(CFG.UNIVERSITY || '')} — ${esc(CFG.COLLEGE || '')}<br>نظام متابعة غيابات الطلبة (يعمل بدون إنترنت)<br>تصميم وتطوير: <b>${esc(CFG.AUTHOR || '')}</b><br><span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span><br>${waLink()}<br>الإصدار ${esc(APP_BUILD)}</p>${CFG.VERSION !== APP_BUILD ? '<p style="color:#dc2626;font-weight:bold">⚠ ملف config.js قديم أو ناقص (رقمه ' + esc(CFG.VERSION || '؟') + '). أعد رفع كل ملفات مجلد app إلى GitHub.</p>' : ''}</div>`;
+  ${isAdmin() ? brandCard() : ''}
+  ${isAdmin() ? '<div class="card"><h2>تصفير البرنامج</h2><p class="muted">يحذف كل البيانات ويعيد البرنامج فارغاً. يطلب كلمة مرور مدير النظام مرة أخرى.</p><button class="btn d" id="sReset" style="background:#dc2626">تصفير البرنامج كاملاً</button></div>' : ''}
+  <div class="card"><h2>حول التطبيق</h2><p>${esc(brand().university || '')} — ${esc(brand().college || '')}<br>نظام متابعة غيابات الطلبة (يعمل بدون إنترنت)<br>تصميم وتطوير: <b>${esc(CFG.AUTHOR || '')}</b><br><span dir="ltr">${esc(CFG.AUTHOR_EMAIL || '')}</span><br>${waLink()}<br>الإصدار ${esc(APP_BUILD)}</p>${CFG.VERSION !== APP_BUILD ? '<p style="color:#dc2626;font-weight:bold">⚠ ملف config.js قديم أو ناقص (رقمه ' + esc(CFG.VERSION || '؟') + '). أعد رفع كل ملفات مجلد app إلى GitHub.</p>' : ''}</div>`;
+  if (isAdmin()) { bindBrand(); $('#sReset').onclick = resetAllModal; }
   $('#sNow').onclick = () => syncNow(true);
   $('#sFull').onclick = async () => { state.since = 0; await metaSet('since', 0); await syncNow(true); toast('تمت إعادة التنزيل'); };
   $('#sRe').onclick = () => { $('#app').innerHTML = ''; renderLogin(); };
