@@ -5,7 +5,7 @@ const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'ف�
 const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '1.0';
+const APP_BUILD = '1.1';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
@@ -678,7 +678,51 @@ function parseCsv(text) {
   row.push(cur); if (row.some(x => x.trim())) rows.push(row);
   return rows;
 }
+
+/* ---------- قراءة ملفات Excel (.xlsx) مباشرة وتحويلها إلى CSV ---------- */
+async function xlsxToCsv(file) {
+  const buf = new Uint8Array(await file.arrayBuffer()), dv = new DataView(buf.buffer), td = new TextDecoder();
+  let e = buf.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error('ملف Excel غير صالح');
+  const n = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true); const ent = {};
+  for (let i = 0; i < n; i++) {
+    const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    ent[td.decode(buf.subarray(p + 46, p + 46 + nl))] = { m: dv.getUint16(p + 10, true), cs: dv.getUint32(p + 20, true), lh: dv.getUint32(p + 42, true) };
+    p += 46 + nl + el + cl;
+  }
+  const read = async name => {
+    const z = ent[name]; if (!z) return null;
+    const st = z.lh + 30 + dv.getUint16(z.lh + 26, true) + dv.getUint16(z.lh + 28, true), raw = buf.subarray(st, st + z.cs);
+    if (z.m === 0) return td.decode(raw);
+    if (typeof DecompressionStream === 'undefined') throw new Error('المتصفح لا يدعم قراءة Excel، احفظ الملف كـ CSV');
+    const ds = new DecompressionStream('deflate-raw'), w = ds.writable.getWriter(); w.write(raw); w.close();
+    return td.decode(await new Response(ds.readable).arrayBuffer());
+  };
+  const xml = t => new DOMParser().parseFromString(t, 'application/xml');
+  const wb = xml(await read('xl/workbook.xml')), rels = xml(await read('xl/_rels/workbook.xml.rels'));
+  const sh = wb.getElementsByTagName('sheet')[0]; if (!sh) throw new Error('الملف لا يحوي أوراقاً');
+  const rid = sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+  let target = ''; Array.from(rels.getElementsByTagName('Relationship')).forEach(r => { if (r.getAttribute('Id') === rid) target = r.getAttribute('Target'); });
+  target = target.replace(/^\//, ''); const path = target.startsWith('xl/') ? target : 'xl/' + target;
+  const ss = []; const sst = await read('xl/sharedStrings.xml');
+  if (sst) Array.from(xml(sst).getElementsByTagName('si')).forEach(si => ss.push(Array.from(si.getElementsByTagName('t')).map(t => t.textContent).join('')));
+  const sheet = xml(await read(path)), rows = [];
+  Array.from(sheet.getElementsByTagName('row')).forEach(r => {
+    const out = [];
+    Array.from(r.getElementsByTagName('c')).forEach(c => {
+      const ref = c.getAttribute('r') || '', col = ref.replace(/\d+/g, '').split('').reduce((a, ch) => a * 26 + ch.charCodeAt(0) - 64, 0) - 1, t = c.getAttribute('t');
+      const v = c.getElementsByTagName('v')[0], is = c.getElementsByTagName('is')[0];
+      let val = '';
+      if (t === 's' && v) val = ss[Number(v.textContent)] || ''; else if (t === 'inlineStr' && is) val = Array.from(is.getElementsByTagName('t')).map(x => x.textContent).join(''); else if (v) val = v.textContent;
+      out[col >= 0 ? col : out.length] = val;
+    });
+    rows.push(Array.from(out, x => x == null ? '' : x));
+  });
+  const q = v => /[",\n\r]/.test(v) ? '"' + String(v).replace(/"/g, '""') + '"' : v;
+  return rows.filter(r => r.some(x => String(x).trim() !== '')).map(r => r.map(q).join(',')).join('\n');
+}
 function readFileText(f) {
+  if (/\.xlsx$/i.test(f.name)) return xlsxToCsv(f);
   return new Promise(res => {
     const r = new FileReader();
     r.onload = () => {
@@ -717,7 +761,7 @@ const IMPORTERS = {
       const dd = depts.length ? depts : (deptId ? [deptId] : []);
       const kind = kindOf(r[1]);
       if (live('teachers').some(t => t.name === name && dd.some(d => d === t.deptId))) { skipped++; continue; }
-      try { await saveStaff({ name, kind, phone: r[2], depts: dd, teaches: false, username: isAdmin() ? r[4] : '', password: isAdmin() ? r[5] : '', active: true }, null); count++; } catch (e) { skipped++; }
+      try { await saveStaff({ name, kind, phone: String(r[2] || '').trim().replace(/^(7\d{9})$/, '0$1'), depts: dd, teaches: false, username: isAdmin() ? r[4] : '', password: isAdmin() ? r[5] : '', active: true }, null); count++; } catch (e) { skipped++; }
     }
     return { count, skipped };
   },
@@ -771,11 +815,11 @@ const IMPORTERS = {
 };
 function importModal(kind, after) {
   const C = kind === 'staff' ? STAFF_IMP : MANAGE[kind];
-  showModal('استيراد ' + C.title + ' من ملف CSV', `<p class="muted">${C.impHelp} السطر الأول يمكن أن يكون عناوين. في Excel: حفظ باسم ← CSV UTF-8.</p>
+  showModal('استيراد ' + C.title + ' من ملف CSV', `<p class="muted">${C.impHelp} السطر الأول يمكن أن يكون عناوين. يمكن رفع ملف Excel (xlsx) أو CSV مباشرة.</p>
    ${C.needDept && multiDept() ? `<label class="f">القسم / الفرع<select id="idept">${deptOpts().map(o => `<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select></label>` : ''}
-   <input type="file" id="ifile" accept=".csv,.txt"><label class="f">أو الصق البيانات هنا<textarea id="itxt" rows="6" dir="auto"></textarea></label>
+   <input type="file" id="ifile" accept=".csv,.txt,.xlsx"><label class="f">أو الصق البيانات هنا<textarea id="itxt" rows="6" dir="auto"></textarea></label>
    <div class="row end"><button class="btn ghost" data-close>إلغاء</button><button class="btn" id="igo">استيراد</button></div>`);
-  $('#ifile').onchange = async e => { const f = e.target.files[0]; if (f) $('#itxt').value = await readFileText(f); };
+  $('#ifile').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { $('#itxt').value = await readFileText(f); } catch (err) { toast(err.message, true); } };
   $('#igo').onclick = async () => {
     const deptId = multiDept() ? ($('#idept') ? $('#idept').value : '') : me().deptId;
     if (C.needDept && !deptId) return toast('اختر القسم', true);
