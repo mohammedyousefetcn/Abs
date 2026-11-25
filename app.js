@@ -5,7 +5,7 @@ const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'ف�
 const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '1.1';
+const APP_BUILD = '1.2';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
@@ -54,7 +54,7 @@ let modalOpen = false;
 
 function toast(msg, err) {
   const d = document.createElement('div'); d.className = 'toast' + (err ? ' err' : ''); d.textContent = msg;
-  $('#toasts').appendChild(d); setTimeout(() => d.remove(), 3500);
+  $('#toasts').appendChild(d); setTimeout(() => d.remove(), Math.min(15000, 3500 + String(msg).length * 60));
 }
 
 /* ---------- النوافذ ---------- */
@@ -753,17 +753,18 @@ const IMPORTERS = {
   staff: async (rows, deptId) => {
     if (rows.length && /الاسم|name/i.test(rows[0][0])) rows = rows.slice(1);
     const kindOf = t => { t = String(t || ''); if (/مدير/.test(t)) return 'admin'; if (/رئيس/.test(t)) return 'head'; if (/مقرر/.test(t)) return 'rapporteur'; if (/فني/.test(t)) return 'tech'; if (/مختبر|lab/i.test(t)) return 'lab'; return 'teacher'; };
-    let count = 0, skipped = 0;
+    let count = 0, skipped = 0; const why = [];
     for (const r of rows) {
       const name = (r[0] || '').trim(); if (!name) { skipped++; continue; }
       const names = String(r[3] || '').split(/[،,;؛]/).map(x => x.trim()).filter(Boolean);
-      const dl = deptOpts(); const depts = names.map(n => (dl.find(o => o[1] === n) || [])[0]).filter(Boolean);
+      const dl = deptOpts(); const depts = names.map(n => (dl.find(o => normName(o[1]) === normName(n)) || [])[0]).filter(Boolean);
+      const unk = names.filter(n => !dl.some(o => normName(o[1]) === normName(n))); if (unk.length) { skipped++; why.push(name + ': القسم غير موجود (' + unk.join('، ') + ')'); continue; }
       const dd = depts.length ? depts : (deptId ? [deptId] : []);
       const kind = kindOf(r[1]);
-      if (live('teachers').some(t => t.name === name && dd.some(d => d === t.deptId))) { skipped++; continue; }
-      try { await saveStaff({ name, kind, phone: String(r[2] || '').trim().replace(/^(7\d{9})$/, '0$1'), depts: dd, teaches: false, username: isAdmin() ? r[4] : '', password: isAdmin() ? r[5] : '', active: true }, null); count++; } catch (e) { skipped++; }
+      if (live('teachers').some(t => t.name === name && dd.some(d => d === t.deptId))) { skipped++; why.push(name + ': موجود مسبقاً في القسم'); continue; }
+      try { await saveStaff({ name, kind, phone: String(r[2] || '').trim().replace(/^(7\d{9})$/, '0$1'), depts: dd, teaches: false, username: isAdmin() ? r[4] : '', password: isAdmin() ? r[5] : '', active: true }, null); count++; } catch (e) { skipped++; why.push(name + ': ' + e.message); }
     }
-    return { count, skipped };
+    return { count, skipped, why };
   },
   teachers: async (rows, deptId) => {
     if (rows.length && /الاسم|name/i.test(rows[0][0])) rows = rows.slice(1);
@@ -827,8 +828,9 @@ function importModal(kind, after) {
     if (!rows.length) return toast('لا توجد بيانات للاستيراد', true);
     try {
       const r = await IMPORTERS[kind](rows, deptId);
-      if (!r.count) return toast('لا توجد سجلات صالحة (تخطي ' + r.skipped + ')', true);
-      closeModal(); toast('تم استيراد ' + r.count + (r.skipped ? ' (تخطي ' + r.skipped + ')' : '')); after && after();
+      const wh = r.why && r.why.length ? ' — ' + r.why.slice(0, 3).join(' | ') + (r.why.length > 3 ? ' …' : '') : '';
+      if (!r.count) return toast('لا توجد سجلات صالحة (تخطي ' + r.skipped + ')' + wh, true);
+      closeModal(); toast('تم استيراد ' + r.count + (r.skipped ? ' (تخطي ' + r.skipped + ')' + wh : '')); after && after();
     } catch (e) { toast(e.message, true); }
   };
 }
