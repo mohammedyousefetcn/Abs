@@ -131,3 +131,10 @@ html,body{overflow-x:hidden}
 .kpi.click,.click{cursor:pointer}.kpi.click:hover{outline:2px solid #1d4ed8}
 
 .swatch{width:34px;height:34px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #9ca3af;cursor:pointer;padding:0}.swatch.on{box-shadow:0 0 0 3px var(--pd)}#brColor{width:44px;height:36px;padding:0;border:0;background:none}
+
+/* وضع البطاقات */
+.cardbox{border:2px solid var(--p)}
+.cin{width:100%;margin-top:8px;font-size:18px;text-align:center;direction:ltr}
+.clast{margin-top:8px;padding:10px;border-radius:8px;background:#e8f5e9;font-weight:700;text-align:center}
+.clast.bad{background:#fdecea;color:#b3261e}
+.cunk{margin-top:8px;display:flex;flex-direction:column;gap:6px}

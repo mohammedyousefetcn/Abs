@@ -5,7 +5,7 @@ const KIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'ف�
 const SKIND = { teacher: 'تدريسي', lab: 'مسؤول مختبر', tech: 'فني', head: 'رئيس قسم', rapporteur: 'مقرر قسم', admin: 'مدير النظام' };
 const STAGE = { 1: 'الأولى', 2: 'الثانية', 3: 'الثالثة', 4: 'الرابعة' };
 const STATUS = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'حضر الساعة الأولى فقط', plast: 'حضر الساعة الأخيرة فقط' };
-const APP_BUILD = '1.2';
+const APP_BUILD = '1.3';
 const BSHORT = { present: 'حاضر', absent: 'غائب', excused: 'مجاز', pfirst: 'أول ساعة', plast: 'آخر ساعة' };
 const BADGE = { absent: 'bad', excused: 'exc', pfirst: 'part', plast: 'part' };
 const isPartial = st => st === 'pfirst' || st === 'plast';
@@ -223,9 +223,98 @@ function attLoad() {
   const s = get('subjects', att.subjectId); if (!s) return;
   const id = sessKey(s.id, att.type, att.no, att.section);
   const ex = get('sessions', id);
-  att.states = {}; att.existing = !!ex;
+  att.states = {}; att.existing = !!ex; att.card = null;
   if (ex) { att.date = ex.date; live('absences').forEach(a => { if (a.sessionId === id) att.states[a.studentId] = a.status; }); }
   else leavePrefill(s);
+}
+
+/* ---------- قراءة بطاقات الطلبة (USB / NFC) ---------- */
+function cardKeys(raw) {
+  const c = String(raw || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  const out = new Set(); if (!c) return out;
+  const nz = x => x.replace(/^0+(?=.)/, '');
+  out.add(nz(c));
+  const addHex = h => {
+    if (h.length % 2) h = '0' + h;
+    const rev = h.match(/../g).reverse().join('');
+    [h, rev].forEach(x => { out.add(nz(x)); try { out.add(BigInt('0x' + x).toString()); } catch (e) {} });
+  };
+  if (/^[0-9A-F]+$/.test(c)) addHex(c);
+  if (/^[0-9]+$/.test(c)) { try { addHex(BigInt(c).toString(16).toUpperCase()); } catch (e) {} }
+  return out;
+}
+const cardMatch = (a, b) => { const A = cardKeys(a); if (!A.size) return false; for (const k of cardKeys(b)) if (A.has(k)) return true; return false; };
+function beep(ok) {
+  try {
+    const A = window.AudioContext || window.webkitAudioContext; if (!A) return;
+    beep.ctx = beep.ctx || new A(); const c = beep.ctx, o = c.createOscillator(), g = c.createGain();
+    o.frequency.value = ok ? 1000 : 220; o.type = ok ? 'sine' : 'square'; g.gain.value = 0.08;
+    o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + (ok ? 0.09 : 0.3));
+  } catch (e) {}
+}
+function cardStart(s, list) {
+  const dirty = Object.keys(att.states).length && !list.every(x => att.states[x.id] === (leaveFor(x, att.date) ? 'excused' : 'absent'));
+  if (dirty && !confirm('سيُعاد ضبط الحضور: الجميع «غائب» حتى تُمرَّر بطاقته. متابعة؟')) return false;
+  att.states = {}; list.forEach(x => { att.states[x.id] = leaveFor(x, att.date) ? 'excused' : 'absent'; });
+  att.card = { on: true, scanned: new Set(), last: null, unk: null, nfc: false };
+  return true;
+}
+function cardScan(raw, list, rerender) {
+  const c = att.card; raw = String(raw || '').trim(); if (!raw) return;
+  const st = live('students').find(x => x.cardNo && cardMatch(x.cardNo, raw));
+  if (!st || !list.some(x => x.id === st.id)) {
+    beep(false);
+    if (st) { c.last = { bad: true, msg: '⚠ ' + st.name + ' — ليس من طلبة هذه المحاضرة' }; c.unk = null; }
+    else { c.last = { bad: true, msg: '⚠ بطاقة غير مسجّلة: ' + raw }; c.unk = { raw, q: '' }; }
+  } else if (c.scanned.has(st.id)) {
+    beep(false); c.last = { bad: true, msg: '↺ ' + st.name + ' — مسجّل مسبقاً' }; c.unk = null;
+  } else {
+    beep(true); c.scanned.add(st.id);
+    delete att.states[st.id];
+    c.last = { msg: '✔ ' + st.name }; c.unk = null;
+  }
+  rerender();
+}
+async function nfcStart(list, rerender) {
+  const c = att.card;
+  if (!('NDEFReader' in window)) { toast('هذا المتصفح لا يدعم قراءة NFC. استخدم Chrome على أندرويد (وليس iPhone) أو قارئ USB.'); return; }
+  try {
+    const r = new NDEFReader(); await r.scan(); c.nfc = true; c.nfcReader = r;
+    r.onreading = ev => {
+      let raw = ev.serialNumber || '';
+      cardScan(raw, list, rerender);
+    };
+    r.onreadingerror = () => { beep(false); c.last = { bad: true, msg: '⚠ تعذّرت قراءة البطاقة (قد لا تكون من نوع يدعمه المتصفح)' }; rerender(); };
+    rerender(); toast('NFC جاهز — قرّب البطاقة من ظهر الهاتف');
+  } catch (e) { toast('تعذّر تشغيل NFC: ' + (e && e.message || e) + ' — فعّل NFC من إعدادات الهاتف وأعطِ الإذن.'); }
+}
+function cardPanel(list) {
+  const c = att.card; if (!c) return '';
+  const u = c.unk;
+  const res = u && u.q ? list.filter(x => !x.cardNo && x.name.includes(u.q)).slice(0, 6) : [];
+  return `<div class="card cardbox"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>📇 وضع البطاقات</b><span class="grow"></span><span class="badge ok">حاضر ${c.scanned.size} من ${list.length}</span><button class="btn ghost sm" id="cNfc">${c.nfc ? 'NFC يعمل ✓' : '📱 تشغيل NFC'}</button><button class="btn danger sm" id="cOff">إنهاء الوضع</button></div>
+   <input id="cIn" class="cin" inputmode="none" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="مرّر البطاقة على القارئ…" aria-label="قارئ البطاقات">
+   <div class="clast${c.last && c.last.bad ? ' bad' : ''}" id="cLast">${c.last ? esc(c.last.msg) : 'الجميع «غائب» حتى تُمرَّر بطاقته. ثم اضغط «حفظ المحاضرة».'}</div>
+   ${u ? `<div class="cunk"><div class="muted">ربط هذه البطاقة بطالب (لم تُربط بطاقته بعد):</div><input type="search" id="cUq" placeholder="اسم الطالب…" value="${esc(u.q)}">${res.map(x => `<button class="btn ghost sm" data-link="${x.id}">${esc(x.name)}</button>`).join(' ')}${u.q && !res.length ? '<div class="muted">لا نتائج (يظهر هنا من ليس لديه بطاقة فقط)</div>' : ''}</div>` : ''}</div>`;
+}
+function cardBind(s, list, rerender) {
+  const c = att.card; if (!c) return;
+  const inp = $('#cIn'); if (!inp) return;
+  let buf = '', tm = null;
+  const flush = () => { clearTimeout(tm); const v = inp.value; inp.value = ''; if (v.trim()) cardScan(v, list, rerender); };
+  inp.onkeydown = e => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); flush(); } };
+  inp.oninput = () => { clearTimeout(tm); tm = setTimeout(() => { if (inp.value.length >= 6) flush(); }, 350); };
+  const refocus = () => { const a = document.activeElement; if (!a || a === document.body) inp.focus(); };
+  inp.onblur = () => setTimeout(refocus, 60);
+  $('#cOff').onclick = () => { if (c.nfcReader) c.nfcReader.onreading = null; att.card = null; rerender(); };
+  $('#cNfc').onclick = () => nfcStart(list, rerender);
+  if ($('#cUq')) $('#cUq').oninput = e => { c.unk.q = e.target.value; const p = e.target.selectionStart; rerender(); const n = $('#cUq'); if (n) { n.focus(); n.setSelectionRange(p, p); } };
+  document.querySelectorAll('[data-link]').forEach(b => b.onclick = async () => {
+    const st = get('students', b.dataset.link); if (!st || !c.unk) return;
+    await saveRecs('students', [Object.assign({}, st, { cardNo: c.unk.raw })]);
+    const raw = c.unk.raw; c.unk = null; cardScan(raw, list, rerender);
+  });
+  if (!c.unk) inp.focus();
 }
 function attendScreen(el) {
   const pairs = attPairs();
@@ -251,6 +340,7 @@ function attendScreen(el) {
     ${!s.section && sections.length > 1 ? `<select id="aSec"><option value="">كل الشعب</option>${sections.map(x => `<option${x === att.section ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}
    </div>
    <p class="muted" style="margin:8px 0 0">${att.existing ? (locked ? '🔒 هذه المحاضرة مسجّلة ولا تملك صلاحية تعديلها.' : '⚠ هذه المحاضرة مسجّلة سابقاً — يمكنك تعديلها.') : 'اضغط على النقطة أمام اسم الطالب لتحديد حالته (الأصل: حاضر، ومن لديه إجازة مسجّلة يُوضع «مجاز» تلقائياً ويمكنك تغييره). «أول ساعة» = حضر الساعة الأولى فقط، «آخر ساعة» = حضر الساعة الأخيرة فقط.'}</p></div>
+  ${att.card ? cardPanel(list) : (!locked && list.length ? '<div class="card" style="padding:8px 12px"><button class="btn ghost sm" id="cOn">📇 تسجيل الحضور بالبطاقات (قارئ USB أو NFC)</button></div>' : '')}
   ${recd.size ? `<div class="card"><h3 style="margin:0 0 8px">المحاضرات المسجّلة</h3><div class="chips">${[...recd.entries()].sort((x, y) => x[0] - y[0]).map(([n, x]) => `<button class="chip${n === att.no ? ' on' : ''}" data-lec="${n}">${n === att.no ? '' : (can('editAttendance') ? '✏ ' : '👁 ')}محاضرة ${n} · ${esc(x.date || '')}</button>`).join('')}</div><p class="muted" style="margin:6px 0 0">${can('editAttendance') ? 'اضغط على محاضرة لفتحها وتعديل حضورها' + (can('deleteAttendance') ? ' أو حذفها.' : ' (الحذف غير مسموح لك).') : 'اضغط لعرض الحضور فقط — لا تملك صلاحية التعديل.'}</p></div>` : ''}
   <div class="card" style="padding:0">
    <div class="filters" style="padding:10px;margin:0"><input type="search" id="aQ" placeholder="بحث عن طالب…" value="${esc(att.q)}"><button class="btn ghost sm" id="aAll">الكل حاضر</button></div>
@@ -259,10 +349,12 @@ function attendScreen(el) {
    <div class="sticky-save"><span>غائب <b>${cnt.absent}</b> · مجاز <b>${cnt.excused}</b> · أول ساعة <b>${cnt.pfirst}</b> · آخر ساعة <b>${cnt.plast}</b> · من ${list.length}</span><span class="grow"></span>
     ${can('exportData') ? '<button class="btn ghost sm" id="aExp">تصدير الكشف</button>' : ''}${att.existing && can('deleteAttendance') ? '<button class="btn danger sm" id="aDel">حذف المحاضرة</button>' : ''}${locked ? '' : `<button class="btn" id="aSave">${att.existing ? 'حفظ التعديل' : 'حفظ المحاضرة'}</button>`}</div></div>`;
   const rerender = () => attendScreen(el);
+  if ($('#cOn')) $('#cOn').onclick = () => { if (cardStart(s, list)) rerender(); };
+  if (att.card) cardBind(s, list, rerender);
   $('#aSub').onchange = e => { const [id, ty] = e.target.value.split('|'); attInit(id, ty); rerender(); };
   $('#aNo').onchange = e => { att.no = Number(e.target.value) || 1; att.date = today(); attLoad(); rerender(); };
   el.querySelectorAll('[data-lec]').forEach(c => c.onclick = () => { att.no = Number(c.dataset.lec); att.date = today(); attLoad(); rerender(); window.scrollTo(0, 0); });
-  $('#aDate').onchange = e => { att.date = e.target.value || today(); if (!att.existing) { att.states = {}; leavePrefill(s); rerender(); } };
+  $('#aDate').onchange = e => { att.date = e.target.value || today(); att.card = null; if (!att.existing) { att.states = {}; leavePrefill(s); rerender(); } };
   if ($('#aSec')) $('#aSec').onchange = e => { att.section = e.target.value; att.date = today(); attLoad(); rerender(); };
   $('#aQ').oninput = e => { att.q = e.target.value; const p = e.target.selectionStart; rerender(); const n = $('#aQ'); n.focus(); n.setSelectionRange(p, p); };
   $('#aAll').onclick = () => { att.states = {}; rerender(); };
@@ -492,11 +584,11 @@ const STAFF_IMP = { title: 'الكادر', impHelp: 'الأعمدة بالترت
 const MANAGE = {
   students: {
     title: 'طالب', table: 'students', stageFilter: true,
-    cols: [['الاسم', r => esc(r.name)], ['الرقم الجامعي', r => esc(r.studentNo || '')], ['المرحلة', r => STAGE[r.stage] || ''], ['الشعبة', r => esc(r.section || '')], ['القسم', r => esc(deptName(r.deptId))]],
-    fields: () => [{ key: 'name', label: 'اسم الطالب', required: true }, { key: 'studentNo', label: 'الرقم الجامعي (اختياري)' }, { key: 'stage', label: 'المرحلة', type: 'select', options: optStages(), required: true, blank: false }, { key: 'section', label: 'الشعبة (A, B …)' }, ...deptField()],
+    cols: [['الاسم', r => esc(r.name)], ['الرقم الجامعي', r => esc(r.studentNo || '')], ['البطاقة', r => r.cardNo ? '📇' : ''], ['المرحلة', r => STAGE[r.stage] || ''], ['الشعبة', r => esc(r.section || '')], ['القسم', r => esc(deptName(r.deptId))]],
+    fields: () => [{ key: 'name', label: 'اسم الطالب', required: true }, { key: 'studentNo', label: 'الرقم الجامعي (اختياري)' }, { key: 'cardNo', label: 'رقم البطاقة (اختياري — اضغط داخل الحقل ومرّر البطاقة على القارئ)' }, { key: 'stage', label: 'المرحلة', type: 'select', options: optStages(), required: true, blank: false }, { key: 'section', label: 'الشعبة (A, B …)' }, ...deptField()],
     clean: v => { v.stage = Number(v.stage); return v; }, perm: 'manageStudents',
-    expHead: ['الاسم', 'المرحلة', 'الشعبة', 'الرقم الجامعي'], expRow: r => [r.name, STAGE[r.stage] || '', r.section || '', r.studentNo || ''],
-    impHelp: 'الأعمدة بالترتيب: <b>الاسم، المرحلة (1-4 أو الأولى…)، الشعبة، الرقم الجامعي</b>.', needDept: true
+    expHead: ['الاسم', 'المرحلة', 'الشعبة', 'الرقم الجامعي', 'رقم البطاقة'], expRow: r => [r.name, STAGE[r.stage] || '', r.section || '', r.studentNo || '', r.cardNo || ''],
+    impHelp: 'الأعمدة بالترتيب: <b>الاسم، المرحلة (1-4 أو الأولى…)، الشعبة، الرقم الجامعي، رقم البطاقة (اختياري)</b>.', needDept: true
   },
   teachers: {
     title: 'تدريسي / مسؤول مختبر', table: 'teachers',
@@ -744,8 +836,13 @@ const IMPORTERS = {
       const name = (r[0] || '').trim(), stage = parseStage(r[1]);
       if (!name || !stage) { skipped++; return; }
       const no = (r[3] || '').trim(); const key = (no || name) + '|' + stage;
-      if (exist.has(key)) { skipped++; return; } exist.add(key);
-      recs.push({ id: uid('s'), name, stage, section: (r[2] || '').trim(), studentNo: no, deptId, deleted: false });
+      const card = (r[4] || '').trim();
+      if (exist.has(key)) {
+        const old = live('students').find(s => s.deptId === deptId && (s.studentNo || s.name) + '|' + s.stage === key);
+        if (card && old && !old.cardNo) { recs.push(Object.assign({}, old, { cardNo: card })); return; }
+        skipped++; return;
+      } exist.add(key);
+      recs.push({ id: uid('s'), name, stage, section: (r[2] || '').trim(), studentNo: no, cardNo: card, deptId, deleted: false });
     });
     if (recs.length) await saveRecs('students', recs);
     return { count: recs.length, skipped };
